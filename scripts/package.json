@@ -1,0 +1,13 @@
+{
+  "name": "gotesting-scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Scripts utilitários para o sistema GoTesting",
+  "scripts": {
+    "update-user": "node update-user-role.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.38.4",
+    "dotenv": "^16.3.1"
+  }
+} 
