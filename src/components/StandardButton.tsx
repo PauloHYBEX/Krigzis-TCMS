@@ -4,7 +4,7 @@ import { ReactNode, forwardRef, ButtonHTMLAttributes } from 'react';
 
 interface StandardButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children?: ReactNode;
-  variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
+  variant?: 'default' | 'brand' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
   size?: 'default' | 'sm' | 'lg' | 'icon';
   icon?: LucideIcon;
   disabled?: boolean;
@@ -47,7 +47,7 @@ export const StandardButton = forwardRef<HTMLButtonElement, StandardButtonProps>
       disabled={disabled || loading}
       type={type}
       aria-label={computedAriaLabel}
-      className={`${compact ? 'min-h-[32px]' : 'min-h-[40px]'} font-medium transition-all duration-200 ${className}`}
+      className={`font-medium transition-all duration-200 ${className}`}
       {...rest}
     >
       {loading ? (

@@ -488,7 +488,7 @@ export const TestPlans = () => {
     <div className="flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
+        <div className="pl-24">
           <h1 className="text-2xl font-bold text-foreground">Planos de Teste</h1>
           <p className="text-sm text-muted-foreground">Gerencie seus planos de teste</p>
         </div>

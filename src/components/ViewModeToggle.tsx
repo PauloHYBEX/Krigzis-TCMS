@@ -1,6 +1,5 @@
-
 import { Grid, List } from 'lucide-react';
-import { StandardButton } from './StandardButton';
+import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface ViewModeToggleProps {
@@ -11,16 +10,17 @@ interface ViewModeToggleProps {
 export const ViewModeToggle = ({ viewMode, onViewModeChange }: ViewModeToggleProps) => {
   return (
     <TooltipProvider>
-      <div className="flex border rounded-md">
+      <div className="flex rounded-lg border border-border overflow-hidden">
         <Tooltip>
           <TooltipTrigger asChild>
-            <StandardButton
-              variant={viewMode === 'cards' ? 'default' : 'outline'}
+            <Button
+              variant={viewMode === 'cards' ? 'default' : 'ghost'}
               size="sm"
-              icon={Grid}
               onClick={() => onViewModeChange('cards')}
-              className="rounded-r-none border-r-0"
-            />
+              className={viewMode === 'cards' ? 'bg-brand text-brand-foreground' : ''}
+            >
+              <Grid className="h-4 w-4" />
+            </Button>
           </TooltipTrigger>
           <TooltipContent>
             <p>Visualização em Cards</p>
@@ -29,13 +29,14 @@ export const ViewModeToggle = ({ viewMode, onViewModeChange }: ViewModeTogglePro
         
         <Tooltip>
           <TooltipTrigger asChild>
-            <StandardButton
-              variant={viewMode === 'list' ? 'default' : 'outline'}
+            <Button
+              variant={viewMode === 'list' ? 'default' : 'ghost'}
               size="sm"
-              icon={List}
               onClick={() => onViewModeChange('list')}
-              className="rounded-l-none"
-            />
+              className={viewMode === 'list' ? 'bg-brand text-brand-foreground' : ''}
+            >
+              <List className="h-4 w-4" />
+            </Button>
           </TooltipTrigger>
           <TooltipContent>
             <p>Visualização em Lista</p>

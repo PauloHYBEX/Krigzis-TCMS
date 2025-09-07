@@ -3,9 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogTrigger, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Plus, Calendar, Eye, Download, PlayCircle } from 'lucide-react';
+import { Plus, Calendar, Download, PlayCircle, Edit, Trash2, Search, Filter, ArrowUpDown } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import { getTestExecutions, deleteTestExecution } from '@/services/supabaseService';
+import { getTestExecutions, getTestExecutionsByProject, getTestPlansByIds, getTestCasesByIds, deleteTestExecution } from '@/services/supabaseService';
 import { TestExecution } from '@/types';
 import { TestExecutionForm } from '@/components/forms/TestExecutionForm';
 import { DetailModal } from '@/components/DetailModal';
@@ -15,11 +15,19 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { VirtualList } from '@/components/VirtualList';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { executionStatusBadgeClass, executionStatusLabel } from '@/lib/labels';
-import { SearchableCombobox } from '@/components/SearchableCombobox';
+import { useProject } from '@/contexts/ProjectContext';
+import { ProjectSelectField } from '@/components/forms/ProjectSelectField';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog';
 
 export const TestExecutions = () => {
   const { user } = useAuth();
@@ -29,7 +37,10 @@ export const TestExecutions = () => {
   const [showForm, setShowForm] = useState(false);
   const [selectedExecution, setSelectedExecution] = useState<TestExecution | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
-  const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
+  const [viewMode, setViewMode] = useState<'cards' | 'list'>(() => {
+    const saved = localStorage.getItem('testExecutions_viewMode');
+    return (saved as 'cards' | 'list') || 'list';
+  });
   const [showEditForm, setShowEditForm] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const [filterStatus, setFilterStatus] = useState<'all' | 'passed' | 'failed' | 'blocked' | 'not_tested'>('all');
@@ -39,6 +50,15 @@ export const TestExecutions = () => {
   // Pagination
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(9);
+  // Projeto atual e filtro por projeto
+  const { currentProject } = useProject();
+  const [filterProject, setFilterProject] = useState<string>(currentProject?.id || 'all');
+  // Mapas para enriquecer colunas (plano/caso)
+  const [planMap, setPlanMap] = useState<Record<string, { id: string; sequence?: number; project_id: string }>>({});
+  const [caseMap, setCaseMap] = useState<Record<string, { id: string; sequence?: number }>>({});
+  // Exclusão
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deletingExecutionId, setDeletingExecutionId] = useState<string | null>(null);
 
   // Tipagem e guarda para status
   const allowedStatuses = ['all', 'passed', 'failed', 'blocked', 'not_tested'] as const;
@@ -49,12 +69,27 @@ export const TestExecutions = () => {
     if (user) {
       loadExecutions();
     }
-  }, [user]);
+  }, [user, filterProject]);
+
+  // Persistir modo de visualização
+  useEffect(() => {
+    localStorage.setItem('testExecutions_viewMode', viewMode);
+  }, [viewMode]);
+
+  // Listener para troca de projeto global
+  useEffect(() => {
+    const handler = () => loadExecutions();
+    window.addEventListener('krg:project-changed', handler as EventListener);
+    return () => window.removeEventListener('krg:project-changed', handler as EventListener);
+  }, []);
 
   // Abrir modal automaticamente se houver ?id=
   useEffect(() => {
     const id = searchParams.get('id');
+    const modal = searchParams.get('modal');
     if (!id) return;
+    // Não abrir visualização se estiver em modo de criação/edição
+    if (modal === 'exec:new' || modal === 'exec:edit') return;
     if (executions.length === 0) return;
     const found = executions.find(e => e.id === id);
     if (found) {
@@ -63,17 +98,21 @@ export const TestExecutions = () => {
     }
   }, [executions, searchParams]);
 
-  // Restaurar filtros via URL (?status=&q=)
+  // Restaurar filtros via URL (?status=&q=&project=)
   useEffect(() => {
     const status = searchParams.get('status');
     const q = searchParams.get('q');
+    const p = searchParams.get('project');
     if (status && isExecStatus(status)) {
       setFilterStatus(status);
     }
     if (q !== null) {
       setSearchTerm(q);
     }
-  }, [searchParams]);
+    if (p) setFilterProject(p);
+    else if (currentProject?.id) setFilterProject(currentProject.id);
+    else setFilterProject('all');
+  }, [searchParams, currentProject?.id]);
 
   // Restaurar abertura de modais via URL (?modal=exec:new | exec:edit&id=...)
   useEffect(() => {
@@ -183,10 +222,28 @@ export const TestExecutions = () => {
 
   const loadExecutions = async () => {
     try {
-      const data = await getTestExecutions(user!.id);
+      setLoading(true);
+      const projectParam = filterProject === 'all' ? undefined : filterProject;
+      const data = projectParam
+        ? await getTestExecutionsByProject(user!.id, projectParam)
+        : await getTestExecutions(user!.id);
       setExecutions(data);
+      // Enriquecer com mapas de plano e caso para exibição
+      const uniquePlanIds = Array.from(new Set(data.map(e => e.plan_id).filter(Boolean)));
+      const uniqueCaseIds = Array.from(new Set(data.map(e => e.case_id).filter(Boolean)));
+      const [plans, cases] = await Promise.all([
+        getTestPlansByIds(user!.id, uniquePlanIds as string[]),
+        getTestCasesByIds(user!.id, uniqueCaseIds as string[]),
+      ]);
+      const pMap: Record<string, { id: string; sequence?: number; project_id: string }> = {};
+      plans.forEach(p => { pMap[p.id] = { id: p.id, sequence: p.sequence, project_id: p.project_id }; });
+      setPlanMap(pMap);
+      const cMap: Record<string, { id: string; sequence?: number }> = {};
+      cases.forEach(c => { cMap[c.id] = { id: c.id, sequence: c.sequence }; });
+      setCaseMap(cMap);
     } catch (error) {
       console.error('Erro ao carregar execuções:', error);
+      setExecutions([]);
     } finally {
       setLoading(false);
     }
@@ -214,6 +271,55 @@ export const TestExecutions = () => {
     const params = new URLSearchParams(searchParams);
     if (val) params.set('q', val); else params.delete('q');
     setSearchParams(params);
+  };
+
+  const handleProjectFilterChange = (projectId: string) => {
+    setFilterProject(projectId);
+    setPage(1);
+    const params = new URLSearchParams(searchParams);
+    if (projectId && projectId !== 'all') params.set('project', projectId);
+    else params.set('project', 'all');
+    setSearchParams(params);
+  };
+
+  // Labels helpers
+  const exeLabel = (e: TestExecution) => {
+    const n = e.sequence ?? null;
+    if (n != null) return `EXE-${String(n).padStart(3, '0')}`;
+    return `EXE-${e.id.slice(0, 4)}`;
+  };
+  const caseLabel = (caseId: string) => {
+    const c = caseMap[caseId];
+    if (!c) return '—';
+    return c.sequence != null ? `CT-${String(c.sequence).padStart(3, '0')}` : `CT-${c.id.slice(0, 4)}`;
+  };
+  const planLabel = (planId: string) => {
+    const p = planMap[planId];
+    if (!p) return '—';
+    return p.sequence != null ? `PT-${String(p.sequence).padStart(3, '0')}` : `PT-${p.id.slice(0, 4)}`;
+  };
+
+  const requestDelete = (id: string) => {
+    setDeletingExecutionId(id);
+    setConfirmDeleteOpen(true);
+  };
+
+  const performDelete = async () => {
+    if (!deletingExecutionId) return;
+    try {
+      await deleteTestExecution(deletingExecutionId);
+      setExecutions(prev => prev.filter(ex => ex.id !== deletingExecutionId));
+      toast({ title: 'Execução excluída', description: 'A execução foi removida com sucesso.' });
+    } catch (error: unknown) {
+      toast({
+        title: 'Erro ao excluir',
+        description: (error instanceof Error ? error.message : 'Não foi possível excluir a execução.'),
+        variant: 'destructive'
+      });
+    } finally {
+      setConfirmDeleteOpen(false);
+      setDeletingExecutionId(null);
+    }
   };
 
   const handleExecutionCreated = (execution: TestExecution) => {
@@ -315,148 +421,162 @@ export const TestExecutions = () => {
   }
 
   return (
-    <div className="space-y-0 min-h-screen flex flex-col">
+    <div className="flex-1 space-y-6 p-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Execuções de Teste</h2>
-          <p className="text-gray-600 dark:text-gray-400">Acompanhe suas execuções de teste</p>
+        <div className="pl-24">
+          <h1 className="text-2xl font-bold text-foreground">Execuções</h1>
+          <p className="text-sm text-muted-foreground">Acompanhe e gerencie as execuções de teste</p>
         </div>
-        <div className="flex gap-2 items-center">
-          <ViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
-          <div className="hidden md:flex items-center gap-2">
-            <Input
-              value={searchTerm}
-              onChange={(e) => handleSearchTermChange(e.target.value)}
-              placeholder="Buscar por número (#12), executor ou notas"
-              className="w-64"
+        {/* Nova Execução */}
+        <Dialog open={showForm} onOpenChange={(open) => {
+          setShowForm(open);
+          const params = new URLSearchParams(searchParams);
+          if (open) {
+            params.set('modal', 'exec:new');
+            params.delete('id');
+          } else {
+            params.delete('modal');
+          }
+          setSearchParams(params);
+        }}>
+          <DialogTrigger asChild>
+            <StandardButton 
+              onClick={() => {}}
+              className="bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Nova Execução
+            </StandardButton>
+          </DialogTrigger>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Nova Execução</DialogTitle>
+              <DialogDescription>Preencha os dados da execução de teste</DialogDescription>
+            </DialogHeader>
+            <TestExecutionForm 
+              onSuccess={handleExecutionCreated}
+              onCancel={() => setShowForm(false)}
             />
-            <SearchableCombobox
-              items={[
-                { value: 'all', label: 'Todos os status' },
-                { value: 'passed', label: 'Aprovado' },
-                { value: 'failed', label: 'Reprovado' },
-                { value: 'blocked', label: 'Bloqueado' },
-                { value: 'not_tested', label: 'Não Testado' },
-              ]}
-              value={filterStatus}
-              onChange={(v) => { if (!v) return; handleFilterStatusChange(v as ExecStatus); }}
-              placeholder="Status"
-              triggerClassName="w-40"
-            />
-            <Select value={`${sortBy}:${sortDir}`} onValueChange={handleSortChange}>
-              <SelectTrigger className="w-56">
-                <SelectValue placeholder="Ordenar" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="executed_at:desc">Data (mais recentes)</SelectItem>
-                <SelectItem value="executed_at:asc">Data (mais antigas)</SelectItem>
-                <SelectItem value="sequence:desc">Número (maior primeiro)</SelectItem>
-                <SelectItem value="sequence:asc">Número (menor primeiro)</SelectItem>
-                <SelectItem value="status:asc">Status (A→Z)</SelectItem>
-                <SelectItem value="status:desc">Status (Z→A)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {executions.length > 0 && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="icon">
-                        <Download className="h-4 w-4" />
-                        <span className="sr-only">Exportar</span>
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleExport('csv')}>
-                        📁 Exportar CSV
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleExport('excel')}>
-                        📊 Exportar Excel
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleExport('json')}>
-                        📄 Exportar JSON
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => handleCopy('txt')}>
-                        📋 Copiar como Texto
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleCopy('md')}>
-                        📝 Copiar como Markdown
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </TooltipTrigger>
-                <TooltipContent>Exportar</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-          <Dialog open={showForm} onOpenChange={(open) => {
-            setShowForm(open);
-            const params = new URLSearchParams(searchParams);
-            if (open) {
-              params.set('modal', 'exec:new');
-              params.delete('id');
-            } else {
-              params.delete('modal');
-            }
-            setSearchParams(params);
-          }}>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DialogTrigger asChild>
-                    <StandardButton icon={Plus} iconOnly ariaLabel="Nova Execução" />
-                  </DialogTrigger>
-                </TooltipTrigger>
-                <TooltipContent>Nova Execução</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Nova Execução</DialogTitle>
-                <DialogDescription>Preencha os dados da execução de teste</DialogDescription>
-              </DialogHeader>
-              <TestExecutionForm 
-                onSuccess={handleExecutionCreated}
-                onCancel={() => setShowForm(false)}
-              />
-            </DialogContent>
-          </Dialog>
+          </DialogContent>
+        </Dialog>
+      </div>
 
-          {/* Edit dialog */}
-          <Dialog open={showEditForm} onOpenChange={(open) => {
-            setShowEditForm(open);
-            const params = new URLSearchParams(searchParams);
-            if (open) {
-              params.set('modal', 'exec:edit');
-              if (selectedExecution) params.set('id', selectedExecution.id);
-            } else {
-              params.delete('modal');
-            }
-            setSearchParams(params);
-          }}>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>
-                  {selectedExecution ? `Editar Execução #${selectedExecution.sequence ?? selectedExecution.id.slice(0, 8)}` : 'Editar Execução'}
-                </DialogTitle>
-                <DialogDescription>Atualize os dados da execução de teste</DialogDescription>
-              </DialogHeader>
-              {selectedExecution && (
-                <TestExecutionForm
-                  execution={selectedExecution}
-                  planId={selectedExecution.plan_id}
-                  caseId={selectedExecution.case_id}
-                  onSuccess={handleExecutionUpdated}
-                  onCancel={() => setShowEditForm(false)}
-                />
-              )}
-            </DialogContent>
-          </Dialog>
+      {/* Search and Controls */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={searchTerm}
+            onChange={(e) => handleSearchTermChange(e.target.value)}
+            placeholder="Buscar por número (#12), executor ou notas"
+            className="pl-10 h-10"
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Project Filter */}
+          <div className="w-56">
+            <ProjectSelectField
+              value={filterProject}
+              onValueChange={handleProjectFilterChange}
+              includeAllOption
+              allLabel="Todos os projetos"
+              placeholder="Filtrar por projeto"
+            />
+          </div>
+
+          {/* View Mode Toggle */}
+          <ViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+
+          {/* Sort Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <ArrowUpDown className="h-4 w-4 mr-2" />
+                Ordenar
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleSortChange('executed_at:desc')}>Mais recentes</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleSortChange('executed_at:asc')}>Mais antigas</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleSortChange('sequence:desc')}>Número (maior primeiro)</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleSortChange('sequence:asc')}>Número (menor primeiro)</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleSortChange('status:asc')}>Status (A→Z)</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleSortChange('status:desc')}>Status (Z→A)</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Filter Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Filter className="h-4 w-4 mr-2" />
+                {filterStatus === 'all' ? 'Todos' : `Status: ${executionStatusLabel(filterStatus as any)}`}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleFilterStatusChange('all' as any)}>Todos</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => handleFilterStatusChange('passed' as any)}>Aprovado</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleFilterStatusChange('failed' as any)}>Reprovado</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleFilterStatusChange('blocked' as any)}>Bloqueado</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleFilterStatusChange('not_tested' as any)}>Não Testado</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Export Dropdown */}
+          {executions.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Download className="h-4 w-4 mr-2" />
+                  Exportar
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExport('csv')}>📁 CSV</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('excel')}>📊 Excel</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('json')}>📄 JSON</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => handleCopy('txt')}>📋 Texto</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleCopy('md')}>📝 Markdown</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
+
+      {/* Edit dialog */}
+      <Dialog open={showEditForm} onOpenChange={(open) => {
+        setShowEditForm(open);
+        const params = new URLSearchParams(searchParams);
+        if (open) {
+          params.set('modal', 'exec:edit');
+          if (selectedExecution) params.set('id', selectedExecution.id);
+        } else {
+          params.delete('modal');
+        }
+        setSearchParams(params);
+      }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedExecution ? `Editar Execução #${selectedExecution.sequence ?? selectedExecution.id.slice(0, 8)}` : 'Editar Execução'}
+            </DialogTitle>
+            <DialogDescription>Atualize os dados da execução de teste</DialogDescription>
+          </DialogHeader>
+          {selectedExecution && (
+            <TestExecutionForm
+              execution={selectedExecution}
+              planId={selectedExecution.plan_id}
+              caseId={selectedExecution.case_id}
+              onSuccess={handleExecutionUpdated}
+              onCancel={() => setShowEditForm(false)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       <div className="flex-1">
         {executions.length === 0 ? (
@@ -481,15 +601,21 @@ export const TestExecutions = () => {
             </StandardButton>
           </div>
         ) : viewMode === 'cards' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 items-stretch">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch">
             {sortedExecutions.length > 0 ? (
               paginatedExecutions.map((execution) => (
-                <Card key={execution.id} className="hover:shadow-md transition-shadow h-full flex flex-col h-[240px]">
+                <Card
+                  key={execution.id}
+                  className="hover:shadow-lg transition-all duration-200 border border-border/50 hover:border-brand/50 h-full flex flex-col cursor-pointer"
+                  onClick={() => handleViewDetails(execution)}
+                >
                   <CardHeader className="p-4 pb-3 flex-shrink-0">
                     <div className="flex items-start justify-between">
-                      <CardTitle className="text-base line-clamp-2 leading-tight flex items-center gap-2 overflow-hidden">
-                        <span className="text-xs text-gray-500">#{execution.sequence ?? execution.id.slice(0, 8)}</span>
-                        Execução
+                      <CardTitle className="text-base line-clamp-2 leading-tight flex items-center gap-2 overflow-hidden min-w-0">
+                        <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-1 rounded flex-shrink-0">
+                          {exeLabel(execution)}
+                        </span>
+                        <span className="truncate">Execução</span>
                         <Badge className={`${executionStatusBadgeClass(execution.status as any)} flex-shrink-0`}>
                           {executionStatusLabel(execution.status as any)}
                         </Badge>
@@ -513,14 +639,6 @@ export const TestExecutions = () => {
                           <Calendar className="h-3 w-3" />
                           {new Date(execution.executed_at).toLocaleDateString('pt-BR')}
                         </div>
-                        <StandardButton 
-                          variant="outline" 
-                          size="sm"
-                          icon={Eye}
-                          onClick={() => handleViewDetails(execution)}
-                        >
-                          Ver Detalhes
-                        </StandardButton>
                       </div>
                     </div>
                   </CardContent>
@@ -531,59 +649,86 @@ export const TestExecutions = () => {
             )}
           </div>
         ) : (
-          <div>
+          // Lista em formato tabela (alinhada a Planos/Casos)
+          <div className="space-y-2">
             {sortedExecutions.length > 0 ? (
-              <VirtualList
-                items={paginatedExecutions}
-                itemKey={(execution) => execution.id}
-                estimateSize={150}
-                overscan={8}
-                useWindow
-                className="space-y-2"
-                renderItem={(execution) => (
-                  <Card className="hover:shadow-md transition-shadow h-full flex flex-col h-[140px]">
-                    <CardContent className="p-3 flex-1 flex flex-col justify-between text-left overflow-hidden">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-1 mb-1">
-                          <h3 className="text-base leading-tight font-medium flex items-center gap-2 overflow-hidden">
-                            <span className="text-xs text-gray-500">#{execution.sequence ?? execution.id.slice(0, 8)}</span>
-                            Execução
-                            <Badge className={`${executionStatusBadgeClass(execution.status as any)} flex-shrink-0`}>
-                              {executionStatusLabel(execution.status as any)}
-                            </Badge>
-                          </h3>
-                        </div>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          <span className="font-medium">Executado por:</span> {execution.executed_by}
-                        </p>
-                        {execution.notes && (
-                          <p className="text-sm text-gray-600 dark:text-gray-400 mb-1 line-clamp-2">
-                            {execution.notes}
-                          </p>
-                        )}
+              <div className="bg-card border border-border rounded-lg overflow-hidden">
+                {/* Header da tabela */}
+                <div className="grid grid-cols-[80px_80px_1fr_120px_160px_140px_100px] gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  <div>ID da Execução</div>
+                  <div>ID do Caso</div>
+                  <div>Plano de Teste</div>
+                  <div>Status</div>
+                  <div>Executado por</div>
+                  <div>Data da Execução</div>
+                  <div>Ações</div>
+                </div>
+                {/* Linhas */}
+                <div className="divide-y divide-border">
+                  {paginatedExecutions.map((execution) => (
+                    <div
+                      key={execution.id}
+                      className="grid grid-cols-[80px_80px_1fr_120px_160px_140px_100px] gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                      onClick={() => handleViewDetails(execution)}
+                    >
+                      {/* ID Execução */}
+                      <div className="flex items-center">
+                        <span className="text-xs font-mono bg-brand/10 text-brand px-2 py-1 rounded">
+                          {exeLabel(execution)}
+                        </span>
                       </div>
-                      <div className="flex items-center justify-between mt-1">
-                        <div className="flex items-center gap-1 text-xs text-gray-500">
-                          <Calendar className="h-3 w-3" />
-                          {new Date(execution.executed_at).toLocaleDateString('pt-BR')}
-                        </div>
-                        <StandardButton 
-                          variant="outline" 
+                      {/* ID Caso */}
+                      <div className="flex items-center">
+                        <span className="text-xs font-mono bg-brand/10 text-brand px-2 py-1 rounded">{caseLabel(execution.case_id)}</span>
+                      </div>
+                      {/* Plano de Teste (TAG do plano) */}
+                      <div className="flex items-center min-w-0">
+                        <span className="text-xs font-mono bg-brand/10 text-brand px-2 py-1 rounded">
+                          {planLabel(execution.plan_id)}
+                        </span>
+                      </div>
+                      {/* Status */}
+                      <div className="flex items-center">
+                        <Badge variant="outline" className={executionStatusBadgeClass(execution.status as any)}>
+                          {executionStatusLabel(execution.status as any)}
+                        </Badge>
+                      </div>
+                      {/* Executado por */}
+                      <div className="flex items-center text-sm text-muted-foreground truncate">
+                        <span className="truncate max-w-[150px]">{execution.executed_by || '—'}</span>
+                      </div>
+                      {/* Data */}
+                      <div className="flex items-center text-sm text-muted-foreground whitespace-nowrap">
+                        {new Date(execution.executed_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                      </div>
+                      {/* Ações */}
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
                           size="sm"
-                          compact
-                          icon={Eye}
-                          onClick={() => handleViewDetails(execution)}
-                          className="flex-shrink-0 px-2 py-1 text-xs"
+                          onClick={(e) => { e.stopPropagation(); setSelectedExecution(execution); setShowEditForm(true); }}
+                          className="h-8 w-8 p-0"
                         >
-                          Ver Detalhes
-                        </StandardButton>
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => { e.stopPropagation(); requestDelete(execution.id); }}
+                          className="h-8 w-8 p-0 text-destructive hover:text-destructive/80"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                        {/* Removido o botão de visualizar (Eye) para manter padrão: clique na linha abre detalhes */}
                       </div>
-                    </CardContent>
-                  </Card>
-                )}
-              />
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : (
-              <div className="text-sm text-gray-500 px-2">Nenhum resultado encontrado com os filtros atuais.</div>
+              <div className="text-center py-12">
+                <p className="text-muted-foreground">Nenhum resultado encontrado com os filtros atuais.</p>
+              </div>
             )}
           </div>
         )}
@@ -677,6 +822,24 @@ export const TestExecutions = () => {
           }
         }}
       />
+
+      {/* Confirm Delete Modal */}
+      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir execução?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. A execução será removida permanentemente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeletingExecutionId(null)}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={performDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

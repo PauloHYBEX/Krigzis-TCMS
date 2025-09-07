@@ -37,6 +37,7 @@ export const Layout = ({ children }: LayoutProps) => {
       cases: 'Casos de Teste',
       'test-cases': 'Casos de Teste',
       executions: 'Execuções',
+      management: 'Gestão',
       requirements: 'Requisitos',
       traceability: 'Rastreabilidade',
       defects: 'Defeitos',

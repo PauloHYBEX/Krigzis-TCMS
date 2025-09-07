@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Plus, Edit, Trash2, Search, ArrowUpDown, Filter, FileText, List, Grid, Calendar } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import { getTestCases, getTestCasesByProject, deleteTestCase, getTestPlans } from '@/services/supabaseService';
+import { getTestCases, getTestCasesByProject, deleteTestCase, getTestPlans, getCaseLinkedCounts } from '@/services/supabaseService';
 import { TestCase } from '@/types';
 import { TestCaseForm } from '@/components/forms/TestCaseForm';
 import { DetailModal } from '@/components/DetailModal';
@@ -59,6 +59,7 @@ export const TestCases = () => {
   const [planProjectMap, setPlanProjectMap] = useState<Record<string, string>>({});
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deletingCaseId, setDeletingCaseId] = useState<string | null>(null);
+  const [caseLinkedCounts, setCaseLinkedCounts] = useState<{ executionCount: number; defectCount: number } | null>(null);
 
   // Carregar casos com base no filtro de projeto
   const loadCases = async () => {
@@ -226,11 +227,31 @@ export const TestCases = () => {
   const handleDelete = async (id: string) => {
     setDeletingCaseId(id);
     setConfirmDeleteOpen(true);
+    setCaseLinkedCounts(null);
+    try {
+      if (user) {
+        const counts = await getCaseLinkedCounts(user.id, id);
+        setCaseLinkedCounts(counts);
+      }
+    } catch (error) {
+      console.error('Erro ao verificar vínculos do caso:', error);
+      setCaseLinkedCounts({ executionCount: 0, defectCount: 0 });
+    }
   };
 
   const performDeleteCase = async () => {
     if (!deletingCaseId) return;
     try {
+      if (caseLinkedCounts && (caseLinkedCounts.executionCount > 0 || caseLinkedCounts.defectCount > 0)) {
+        toast({
+          title: 'Exclusão bloqueada',
+          description: 'Este caso possui execuções e/ou defeitos vinculados. Remova as dependências antes de excluir.',
+          variant: 'destructive'
+        });
+        setConfirmDeleteOpen(false);
+        setDeletingCaseId(null);
+        return;
+      }
       await deleteTestCase(deletingCaseId);
       setCases(prev => prev.filter(c => c.id !== deletingCaseId));
       toast({ title: 'Sucesso', description: 'Caso de teste excluído com sucesso!' });
@@ -253,6 +274,7 @@ export const TestCases = () => {
     } finally {
       setConfirmDeleteOpen(false);
       setDeletingCaseId(null);
+      setCaseLinkedCounts(null);
     }
   };
 
@@ -279,7 +301,7 @@ export const TestCases = () => {
     <div className="flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
+        <div className="pl-24">
           <h1 className="text-2xl font-bold text-foreground">Casos de Teste</h1>
           <p className="text-sm text-muted-foreground">Gerencie seus casos de teste</p>
         </div>
@@ -647,19 +669,34 @@ export const TestCases = () => {
       />
 
       {/* Confirm Delete Modal */}
-      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+      <AlertDialog open={confirmDeleteOpen} onOpenChange={(open) => {
+        setConfirmDeleteOpen(open);
+        if (!open) {
+          setDeletingCaseId(null);
+          setCaseLinkedCounts(null);
+        }
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir caso de teste?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. O caso de teste será removido permanentemente.
+              {caseLinkedCounts == null && 'Verificando dependências...'}
+              {caseLinkedCounts && (caseLinkedCounts.executionCount > 0 || caseLinkedCounts.defectCount > 0)
+                ? (
+                  <span>
+                    Este caso possui {caseLinkedCounts.executionCount} execução(ões) e {caseLinkedCounts.defectCount} defeito(s) vinculados.
+                    Remova essas dependências antes de excluir o caso para manter a integridade dos dados.
+                  </span>
+                ) : (caseLinkedCounts && 'Esta ação não pode ser desfeita. O caso será removido permanentemente.')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setDeletingCaseId(null)}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={performDeleteCase} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Excluir
-            </AlertDialogAction>
+            {caseLinkedCounts && caseLinkedCounts.executionCount === 0 && caseLinkedCounts.defectCount === 0 && (
+              <AlertDialogAction onClick={performDeleteCase} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                Excluir
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

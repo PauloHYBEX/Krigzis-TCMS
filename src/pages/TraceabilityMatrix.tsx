@@ -21,8 +21,9 @@ import {
   requirementStatusLabel, 
   requirementStatusBadgeClass 
 } from '@/lib/labels';
+import { ViewModeToggle } from '@/components/ViewModeToggle';
 
-export const TraceabilityMatrix = () => {
+export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPreferredViewModeChange }: { embedded?: boolean; preferredViewMode?: 'cards'|'list'; onPreferredViewModeChange?: (m: 'cards'|'list') => void; }) => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [requirements, setRequirements] = useState<Requirement[]>([]);
@@ -33,12 +34,29 @@ export const TraceabilityMatrix = () => {
   const [saving, setSaving] = useState(false);
   const [availableQuery, setAvailableQuery] = useState('');
   const [linkedQuery, setLinkedQuery] = useState('');
+  const [viewMode, setViewMode] = useState<'cards' | 'list'>(() => {
+    if (preferredViewMode) return preferredViewMode;
+    const saved = localStorage.getItem('traceability_viewMode');
+    return (saved as 'cards' | 'list') || 'cards';
+  });
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     if (user) {
       bootstrap();
     }
   }, [user]);
+
+  useEffect(() => {
+    localStorage.setItem('traceability_viewMode', viewMode);
+    onPreferredViewModeChange?.(viewMode);
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (preferredViewMode && preferredViewMode !== viewMode) {
+      setViewMode(preferredViewMode);
+    }
+  }, [preferredViewMode]);
 
   const bootstrap = async () => {
     try {
@@ -114,6 +132,16 @@ export const TraceabilityMatrix = () => {
     [manageReqId, requirements]
   );
 
+  const filteredRequirements = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return requirements;
+    return requirements.filter(r =>
+      (r.title || '').toLowerCase().includes(q) ||
+      (r.description || '').toLowerCase().includes(q) ||
+      (r.id || '').toLowerCase().includes(q)
+    );
+  }, [requirements, searchTerm]);
+
   const filteredAllCases = useMemo(() => {
     const q = availableQuery.trim().toLowerCase();
     if (!q) return allCases;
@@ -146,47 +174,106 @@ export const TraceabilityMatrix = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <LinkIcon className="h-6 w-6" /> Matriz de Rastreabilidade
-          </h2>
-          <p className="text-gray-600 dark:text-gray-400">Vincule requisitos a casos de teste</p>
+      {!embedded && (
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <LinkIcon className="h-6 w-6" /> Matriz de Rastreabilidade
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400">Vincule requisitos a casos de teste</p>
+          </div>
         </div>
+      )}
+
+      {/* Toolbar */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="relative w-full max-w-md">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar por ID ou Título"
+            className="pl-9"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        {!embedded && (
+          <ViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+        )}
       </div>
 
-      {requirements.length === 0 ? (
+      {filteredRequirements.length === 0 ? (
         <div className="text-center py-12 text-gray-500">Nenhum requisito disponível para rastreabilidade.</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-          {requirements.map(req => {
-            const linkedCount = (linkedByReq[req.id] || []).length;
-            return (
-              <Card key={req.id} className="h-full flex flex-col hover:shadow-md transition-shadow">
-                <CardHeader className="p-4 pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    {req.title}
-                    <Badge className={priorityBadgeClass(req.priority)}>{priorityLabel(req.priority)}</Badge>
-                    <Badge className={requirementStatusBadgeClass(req.status)}>{requirementStatusLabel(req.status)}</Badge>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-4 pt-0">
-                  <div className="text-sm text-gray-600 dark:text-gray-400 mb-2 line-clamp-2">
-                    {req.description}
-                  </div>
-                  <div className="mt-auto flex items-center justify-between">
-                    <div className="text-sm text-gray-500">
-                      {linkedCount} caso(s) vinculado(s)
+        <>
+          {viewMode === 'cards' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredRequirements.map(req => {
+                const linkedCount = (linkedByReq[req.id] || []).length;
+                return (
+                  <Card key={req.id} className="h-full flex flex-col border border-border/50 hover:border-brand/50 hover:shadow-lg transition-all duration-200 overflow-hidden">
+                    <CardHeader className="p-4 pb-3">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-1 rounded flex-shrink-0">{`REQ-${(req.id || '').slice(0,4)}`}</span>
+                          <CardTitle className="text-base line-clamp-2 leading-tight min-w-0">{req.title}</CardTitle>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-0 flex flex-col h-full">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex gap-2">
+                          <Badge className={priorityBadgeClass(req.priority)}>{priorityLabel(req.priority)}</Badge>
+                          <Badge className={requirementStatusBadgeClass(req.status)}>{requirementStatusLabel(req.status)}</Badge>
+                        </div>
+                      </div>
+                      <div className="text-sm text-muted-foreground mb-2 line-clamp-2">{req.description}</div>
+                      <div className="mt-auto flex items-center justify-between">
+                        <div className="text-sm text-muted-foreground">{linkedCount} caso(s) vinculado(s)</div>
+                        <StandardButton 
+                          variant="outline" 
+                          size="sm" 
+                          compact 
+                          icon={Cog} 
+                          className="whitespace-nowrap"
+                          onClick={() => openManage(req.id)}
+                        >
+                          Gerenciar Vínculos
+                        </StandardButton>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="border rounded-md overflow-hidden">
+              <div className="grid grid-cols-[160px_1fr_160px_160px_180px] items-center px-4 py-2 text-xs uppercase text-muted-foreground bg-muted/40">
+                <div>ID</div>
+                <div>Título</div>
+                <div>Prioridade</div>
+                <div>Status</div>
+                <div className="text-right">Vínculos / Ações</div>
+              </div>
+              {filteredRequirements.map((req) => {
+                const linkedCount = (linkedByReq[req.id] || []).length;
+                return (
+                  <div key={req.id} className="grid grid-cols-[160px_1fr_160px_160px_180px] items-center px-4 py-3 border-t hover:bg-muted/30">
+                    <div className="text-sm font-mono">#{req.id.slice(0, 8)}</div>
+                    <div className="font-medium">{req.title}</div>
+                    <div><Badge className={priorityBadgeClass(req.priority)}>{priorityLabel(req.priority)}</Badge></div>
+                    <div><Badge className={requirementStatusBadgeClass(req.status)}>{requirementStatusLabel(req.status)}</Badge></div>
+                    <div className="flex items-center justify-end gap-3">
+                      <span className="text-sm text-muted-foreground">{linkedCount} vínculos</span>
+                      <StandardButton size="sm" icon={Cog} onClick={() => openManage(req.id)}>
+                        Gerenciar
+                      </StandardButton>
                     </div>
-                    <StandardButton size="sm" icon={Cog} onClick={() => openManage(req.id)}>
-                      Gerenciar Vínculos
-                    </StandardButton>
                   </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
 
       <Dialog open={!!manageReqId} onOpenChange={(open) => !open && closeManage()}>

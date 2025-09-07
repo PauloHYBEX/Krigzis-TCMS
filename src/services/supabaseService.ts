@@ -26,6 +26,44 @@ export const getTestPlans = async (userId: string, projectId?: string): Promise<
   }));
 };
 
+// ===== Contadores por Caso =====
+export const countExecutionsByCase = async (userId: string, caseId: string): Promise<number> => {
+  const { count, error } = await supabase
+    .from('test_executions')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('case_id', caseId);
+  if (error) {
+    console.error('Erro ao contar execuções por caso:', error);
+    throw error;
+  }
+  return count || 0;
+};
+
+export const countDefectsByCase = async (userId: string, caseId: string): Promise<number> => {
+  const { count, error } = await supabase
+    .from('defects')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('case_id', caseId);
+  if (error) {
+    console.error('Erro ao contar defeitos por caso:', error);
+    throw error;
+  }
+  return count || 0;
+};
+
+export const getCaseLinkedCounts = async (
+  userId: string,
+  caseId: string
+): Promise<{ executionCount: number; defectCount: number }> => {
+  const [executionCount, defectCount] = await Promise.all([
+    countExecutionsByCase(userId, caseId),
+    countDefectsByCase(userId, caseId),
+  ]);
+  return { executionCount, defectCount };
+};
+
 // Alias para buscar planos de um projeto específico
 export const getTestPlansByProject = async (userId: string, projectId: string): Promise<TestPlan[]> => {
   return getTestPlans(userId, projectId);
@@ -190,6 +228,47 @@ export const getTestCasesByProject = async (userId: string, projectId: string): 
   }));
 };
 
+// Busca planos por uma lista de IDs
+export const getTestPlansByIds = async (userId: string, ids: string[]): Promise<TestPlan[]> => {
+  if (!ids || ids.length === 0) return [];
+  const { data, error } = await supabase
+    .from('test_plans')
+    .select('*')
+    .eq('user_id', userId)
+    .in('id', ids);
+  if (error) {
+    console.error('Erro ao buscar planos por IDs:', error);
+    throw error;
+  }
+  return (data || []).map((plan: any) => ({
+    ...plan,
+    created_at: new Date(plan.created_at),
+    updated_at: new Date(plan.updated_at)
+  }));
+};
+
+// Busca casos por uma lista de IDs
+export const getTestCasesByIds = async (userId: string, ids: string[]): Promise<TestCase[]> => {
+  if (!ids || ids.length === 0) return [];
+  const { data, error } = await supabase
+    .from('test_cases')
+    .select('*')
+    .eq('user_id', userId)
+    .in('id', ids);
+  if (error) {
+    console.error('Erro ao buscar casos por IDs:', error);
+    throw error;
+  }
+  return (data || []).map((testCase: any) => ({
+    ...testCase,
+    steps: Array.isArray(testCase.steps) ? (testCase.steps as unknown as TestStep[]) : [],
+    priority: testCase.priority as 'low' | 'medium' | 'high' | 'critical',
+    type: testCase.type as 'functional' | 'integration' | 'performance' | 'security' | 'usability',
+    created_at: new Date(testCase.created_at),
+    updated_at: new Date(testCase.updated_at)
+  }));
+};
+
 export const createTestCase = async (testCase: Omit<TestCase, 'id' | 'created_at' | 'updated_at'>): Promise<TestCase> => {
   // Ensure user_id is present (fallback to current authenticated user)
   const payload: any = {
@@ -307,6 +386,43 @@ export const getTestExecutions = async (userId: string, planId?: string, caseId?
   }
 
   return data.map(execution => ({
+    ...execution,
+    status: execution.status as 'passed' | 'failed' | 'blocked' | 'not_tested',
+    executed_at: new Date(execution.executed_at)
+  }));
+};
+
+// Busca execuções por projeto atual via planos associados
+export const getTestExecutionsByProject = async (userId: string, projectId: string): Promise<TestExecution[]> => {
+  // 1) Buscar IDs de planos do usuário no projeto
+  const { data: plans, error: planErr } = await supabase
+    .from('test_plans')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('project_id', projectId);
+
+  if (planErr) {
+    console.error('Erro ao buscar planos para o projeto em getTestExecutionsByProject:', planErr);
+    throw planErr;
+  }
+
+  const planIds = (plans || []).map(p => p.id);
+  if (planIds.length === 0) return [];
+
+  // 2) Buscar execuções vinculadas a esses planos
+  const { data, error } = await supabase
+    .from('test_executions')
+    .select('*')
+    .eq('user_id', userId)
+    .in('plan_id', planIds)
+    .order('executed_at', { ascending: false });
+
+  if (error) {
+    console.error('Erro ao buscar execuções por projeto:', error);
+    throw error;
+  }
+
+  return (data || []).map((execution: any) => ({
     ...execution,
     status: execution.status as 'passed' | 'failed' | 'blocked' | 'not_tested',
     executed_at: new Date(execution.executed_at)
