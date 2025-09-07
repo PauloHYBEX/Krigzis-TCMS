@@ -494,13 +494,13 @@ export const TestCases = () => {
           {filteredCases.length > 0 ? (
             <div className="bg-card border border-border rounded-lg overflow-hidden">
               {/* Header da tabela */}
-              <div className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] items-center gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              <div className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] items-start gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 <div>ID</div>
-                <div>Título</div>
-                <div>Projeto</div>
-                <div>Prioridade</div>
-                <div>Criado em</div>
-                <div>Ações</div>
+                <div className="text-center pt-px">Título</div>
+                <div className="text-center">Projeto</div>
+                <div className="text-center">Prioridade</div>
+                <div className="text-center">Criado em</div>
+                <div className="flex justify-end">Ações</div>
               </div>
               
               {/* Linhas da tabela */}
@@ -508,7 +508,7 @@ export const TestCases = () => {
                 {paginatedCases.map((testCase) => (
                   <div 
                     key={testCase.id} 
-                    className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] items-center gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                    className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] items-start gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
                     onClick={() => handleViewDetails(testCase)}
                   >
                     <div className="flex items-center">
@@ -517,32 +517,28 @@ export const TestCases = () => {
                       </span>
                     </div>
                     
-                    <div className="flex items-center min-w-0">
+                    <div className="flex items-start min-w-0 self-start justify-center text-center">
                       <div className="min-w-0">
-                        <div className="font-medium text-foreground truncate">
-                          {testCase.title}
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate">
-                          {testCase.description || 'Sem descrição'}
-                        </div>
+                        <div className="text-sm font-medium leading-tight text-foreground truncate">{testCase.title}</div>
+                        <div className="text-xs text-muted-foreground truncate">{testCase.description || 'Sem descrição'}</div>
                       </div>
                     </div>
                     
-                    <div className="flex items-center">
+                    <div className="flex items-center justify-center">
                       <ProjectDisplayField projectId={planProjectMap[testCase.plan_id] || ''} />
                     </div>
                     
-                    <div className="flex items-center">
+                    <div className="flex items-center justify-center">
                       <Badge variant="outline" className={priorityBadgeClass(testCase.priority)}>
                         {priorityLabel(testCase.priority)}
                       </Badge>
                     </div>
                     
-                    <div className="flex items-center text-xs text-muted-foreground">
+                    <div className="flex items-center justify-center text-xs text-muted-foreground">
                       {testCase.created_at ? new Date(testCase.created_at).toLocaleDateString('pt-BR') : 'N/A'}
                     </div>
                     
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 justify-end">
                       <Button
                         variant="ghost"
                         size="sm"

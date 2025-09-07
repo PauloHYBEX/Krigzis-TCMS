@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Criar Ícone ICO</title>
+</head>
+<body>
+    <canvas id="canvas" width="256" height="256" style="border:1px solid #ccc;"></canvas>
+    <br><br>
+    <button onclick="downloadICO()">Download ICO</button>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Criar gradiente
+        const gradient = ctx.createLinearGradient(0, 0, 256, 256);
+        gradient.addColorStop(0, '#00D4AA');
+        gradient.addColorStop(1, '#7B3FF2');
+        
+        // Desenhar círculo com gradiente
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(128, 128, 120, 0, 2 * Math.PI);
+        ctx.fill();
+        
+        // Configurar texto
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 140px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        // Sombra do texto
+        ctx.shadowColor = 'rgba(0,0,0,0.3)';
+        ctx.shadowBlur = 3;
+        ctx.shadowOffsetX = 2;
+        ctx.shadowOffsetY = 2;
+        
+        // Desenhar letra K
+        ctx.fillText('K', 128, 128);
+        
+        function downloadICO() {
+            // Converter para blob
+            canvas.toBlob(function(blob) {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'icon.ico';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 'image/png');
+        }
+    </script>
+</body>
+</html>

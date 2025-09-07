@@ -654,21 +654,21 @@ export const TestExecutions = () => {
             {sortedExecutions.length > 0 ? (
               <div className="bg-card border border-border rounded-lg overflow-hidden">
                 {/* Header da tabela */}
-                <div className="grid grid-cols-[80px_80px_1fr_120px_160px_140px_100px] gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  <div>ID da Execução</div>
-                  <div>ID do Caso</div>
-                  <div>Plano de Teste</div>
-                  <div>Status</div>
-                  <div>Executado por</div>
-                  <div>Data da Execução</div>
-                  <div>Ações</div>
+                <div className="grid grid-cols-[80px_80px_1fr_120px_160px_140px_100px] items-start gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  <div className="pt-px">ID da Execução</div>
+                  <div className="text-center pt-px">ID do Caso</div>
+                  <div className="text-center pt-px">Plano de Teste</div>
+                  <div className="text-center pt-px">Status</div>
+                  <div className="text-center pt-px">Executado por</div>
+                  <div className="text-center pt-px">Data da Execução</div>
+                  <div className="flex justify-end">Ações</div>
                 </div>
                 {/* Linhas */}
                 <div className="divide-y divide-border">
                   {paginatedExecutions.map((execution) => (
                     <div
                       key={execution.id}
-                      className="grid grid-cols-[80px_80px_1fr_120px_160px_140px_100px] gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                      className="grid grid-cols-[80px_80px_1fr_120px_160px_140px_100px] items-start gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
                       onClick={() => handleViewDetails(execution)}
                     >
                       {/* ID Execução */}
@@ -678,31 +678,31 @@ export const TestExecutions = () => {
                         </span>
                       </div>
                       {/* ID Caso */}
-                      <div className="flex items-center">
+                      <div className="flex items-center justify-center">
                         <span className="text-xs font-mono bg-brand/10 text-brand px-2 py-1 rounded">{caseLabel(execution.case_id)}</span>
                       </div>
                       {/* Plano de Teste (TAG do plano) */}
-                      <div className="flex items-center min-w-0">
+                      <div className="flex items-center justify-center min-w-0">
                         <span className="text-xs font-mono bg-brand/10 text-brand px-2 py-1 rounded">
                           {planLabel(execution.plan_id)}
                         </span>
                       </div>
                       {/* Status */}
-                      <div className="flex items-center">
+                      <div className="flex items-center justify-center">
                         <Badge variant="outline" className={executionStatusBadgeClass(execution.status as any)}>
                           {executionStatusLabel(execution.status as any)}
                         </Badge>
                       </div>
                       {/* Executado por */}
-                      <div className="flex items-center text-sm text-muted-foreground truncate">
+                      <div className="flex items-center justify-center text-sm text-muted-foreground truncate">
                         <span className="truncate max-w-[150px]">{execution.executed_by || '—'}</span>
                       </div>
                       {/* Data */}
-                      <div className="flex items-center text-sm text-muted-foreground whitespace-nowrap">
+                      <div className="flex items-center justify-center text-sm text-muted-foreground whitespace-nowrap">
                         {new Date(execution.executed_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
                       </div>
                       {/* Ações */}
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 justify-end">
                         <Button
                           variant="ghost"
                           size="sm"

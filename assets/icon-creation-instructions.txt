@@ -1,0 +1,32 @@
+
+# Instruções para Criação do Ícone ICO
+
+## Método 1: Conversão Online (Recomendado)
+1. Vá para https://convertio.co/svg-ico/
+2. Faça upload do arquivo 'icon_256x256.svg'
+3. Baixe como 'icon.ico'
+4. Substitua o arquivo 'icon.ico' na pasta assets/
+
+## Método 2: Electron Builder (Automático)
+O electron-builder converte automaticamente SVG para ICO durante o build.
+Configure no package.json:
+{
+  "build": {
+    "win": {
+      "icon": "assets/icon_256x256.svg"
+    }
+  }
+}
+
+## Método 3: ImageMagick (Linha de comando)
+Se tiver ImageMagick instalado:
+magick convert icon_256x256.svg icon.ico
+
+## Tamanhos incluídos no ICO:
+- 16x16 (menu do sistema)
+- 24x24 (barra de tarefas pequena) 
+- 32x32 (barra de tarefas normal)
+- 48x48 (área de trabalho)
+- 64x64 (alta resolução)
+- 128x128 (muito alta resolução)
+- 256x256 (máxima qualidade)
