@@ -395,7 +395,7 @@ export const TestPlans = () => {
 
       const tableData = filteredAndSortedPlans.map(plan => ({
         ID: `PT-${String(plan.sequence ?? '001').padStart(3, '0')}`,
-        Nome: plan.title,
+        Título: plan.title,
         Projeto: getProjectLabel(plan.project_id),
         Status: getStatusLabel(plan.status),
         Criação: plan.created_at.toLocaleDateString('pt-BR')
@@ -404,8 +404,8 @@ export const TestPlans = () => {
       if (format === 'pdf') {
         // Criar PDF simples sem dependências externas
         const content = `Planos de Teste\nExportado em: ${new Date().toLocaleDateString('pt-BR')}\n\n` +
-          `ID\tNome\tProjeto\tStatus\tCriação\n` +
-          tableData.map(row => `${row.ID}\t${row.Nome}\t${row.Projeto}\t${row.Status}\t${row.Criação}`).join('\n');
+          `ID\tTítulo\tProjeto\tStatus\tCriação\n` +
+          tableData.map(row => `${row.ID}\t${row["Título"]}\t${row.Projeto}\t${row.Status}\t${row.Criação}`).join('\n');
         
         const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
@@ -450,7 +450,7 @@ export const TestPlans = () => {
       };
 
       const tableData = {
-        headers: ['ID', 'Nome', 'Projeto', 'Status', 'Criação'],
+        headers: ['ID', 'Título', 'Projeto', 'Status', 'Criação'],
         rows: filteredAndSortedPlans.map(plan => [
           `PT-${String(plan.sequence ?? '001').padStart(3, '0')}`,
           plan.title,
@@ -567,10 +567,10 @@ export const TestPlans = () => {
                 Mais antigo
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => { setSortBy('title'); setSortOrder('asc'); }}>
-                Nome (A-Z)
+                Título (A-Z)
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => { setSortBy('title'); setSortOrder('desc'); }}>
-                Nome (Z-A)
+                Título (Z-A)
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -687,9 +687,9 @@ export const TestPlans = () => {
               {filteredAndSortedPlans.length > 0 ? (
                 <div className="bg-card border border-border rounded-lg overflow-hidden">
                   {/* Header da tabela */}
-                  <div className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  <div className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] items-center gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
                     <div>ID</div>
-                    <div>Nome</div>
+                    <div>Título</div>
                     <div>Projeto</div>
                     <div>Status</div>
                     <div>Criado em</div>
@@ -701,7 +701,7 @@ export const TestPlans = () => {
                     {paginatedPlans.map((plan) => (
                       <div 
                         key={plan.id} 
-                        className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                        className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] items-center gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
                         onClick={() => handleViewDetails(plan)}
                       >
                         <div className="flex items-center">

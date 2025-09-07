@@ -494,7 +494,7 @@ export const TestCases = () => {
           {filteredCases.length > 0 ? (
             <div className="bg-card border border-border rounded-lg overflow-hidden">
               {/* Header da tabela */}
-              <div className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              <div className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] items-center gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 <div>ID</div>
                 <div>Título</div>
                 <div>Projeto</div>
@@ -508,7 +508,7 @@ export const TestCases = () => {
                 {paginatedCases.map((testCase) => (
                   <div 
                     key={testCase.id} 
-                    className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                    className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] items-center gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
                     onClick={() => handleViewDetails(testCase)}
                   >
                     <div className="flex items-center">
