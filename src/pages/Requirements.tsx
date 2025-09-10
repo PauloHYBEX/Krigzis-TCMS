@@ -10,6 +10,7 @@ import {
   deleteRequirement
 } from '@/services/supabaseService';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
 import { StandardButton } from '@/components/StandardButton';
 import { Badge } from '@/components/ui/badge';
@@ -36,7 +37,7 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
   const [viewMode, setViewMode] = useState<'cards' | 'list'>(() => {
     if (preferredViewMode) return preferredViewMode;
     const saved = localStorage.getItem('requirements_viewMode');
-    return (saved as 'cards' | 'list') || 'cards';
+    return (saved as 'cards' | 'list') || 'list';
   });
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -393,26 +394,61 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
               ))}
             </div>
           ) : (
-            <div className="border rounded-md overflow-hidden">
-              <div className="grid grid-cols-[160px_1fr_160px_160px_160px] items-center px-4 py-2 text-xs uppercase text-muted-foreground bg-muted/40">
-                <div>ID</div>
-                <div>Título</div>
-                <div>Prioridade</div>
-                <div>Status</div>
-                <div className="text-right">Ações</div>
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              {/* Header */}
+              <div className="grid grid-cols-[80px_1fr_120px_120px_100px] items-start gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                <div className="pt-px">ID</div>
+                <div className="text-center pt-px">Título</div>
+                <div className="text-center pt-px">Prioridade</div>
+                <div className="text-center pt-px">Status</div>
+                <div className="flex justify-end">Ações</div>
               </div>
-              {filtered.map((req, idx) => (
-                <div key={req.id} className="grid grid-cols-[160px_1fr_160px_160px_160px] items-center px-4 py-3 border-t hover:bg-muted/30">
-                  <div className="text-sm font-mono">#{req.id.slice(0, 8)}</div>
-                  <div className="font-medium">{req.title}</div>
-                  <div><Badge className={priorityBadgeClass(req.priority)}>{priorityLabel(req.priority)}</Badge></div>
-                  <div><Badge className={requirementStatusBadgeClass(req.status)}>{requirementStatusLabel(req.status)}</Badge></div>
-                  <div className="flex justify-end gap-2">
-                    <StandardButton size="sm" variant="outline" icon={Pencil} onClick={() => openEdit(req)}>Editar</StandardButton>
-                    <StandardButton size="sm" variant="outline" icon={Trash2} onClick={() => remove(req.id)}>Excluir</StandardButton>
+              {/* Rows */}
+              <div className="divide-y divide-border">
+                {filtered.map((req) => (
+                  <div key={req.id} className="grid grid-cols-[80px_1fr_120px_120px_100px] items-start gap-4 px-4 py-3 hover:bg-muted/30 transition-colors">
+                    {/* ID */}
+                    <div className="flex items-center">
+                      <span className="text-xs font-mono bg-brand/10 text-brand px-2 py-1 rounded">{`REQ-${(req.id || '').slice(0,4)}`}</span>
+                    </div>
+                    {/* Título */}
+                    <div className="text-sm font-medium leading-tight text-center flex items-center justify-center min-w-0">
+                      <span className="truncate">{req.title}</span>
+                    </div>
+                    {/* Prioridade */}
+                    <div className="flex items-center justify-center">
+                      <Badge className={priorityBadgeClass(req.priority)}>{priorityLabel(req.priority)}</Badge>
+                    </div>
+                    {/* Status */}
+                    <div className="flex items-center justify-center">
+                      <Badge className={requirementStatusBadgeClass(req.status)}>{requirementStatusLabel(req.status)}</Badge>
+                    </div>
+                    {/* Ações */}
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEdit(req)}
+                        className="h-8 w-8 p-0"
+                        title="Editar"
+                        aria-label="Editar"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => remove(req.id)}
+                        className="h-8 w-8 p-0 text-destructive hover:text-destructive/80"
+                        title="Excluir"
+                        aria-label="Excluir"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
         </>

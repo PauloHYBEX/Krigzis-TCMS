@@ -111,7 +111,7 @@ export const Sidebar = () => {
             {isExpanded ? (
               <div className="flex items-center gap-2">
                 <KrigzisLogo size={24} className="h-6 w-6" />
-                <h1 className="text-xl font-bold text-sidebar-foreground">Krigzis web</h1>
+                <h1 className="text-xl font-bold text-sidebar-foreground">Krigzis TCMS</h1>
               </div>
             ) : (
               <KrigzisLogo size={24} className="h-6 w-6" />

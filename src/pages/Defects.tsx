@@ -12,6 +12,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { StandardButton } from '@/components/StandardButton';
+import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Pencil, Trash2, Bug as BugIcon, Search } from 'lucide-react';
 import { 
@@ -36,7 +37,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
   const [viewMode, setViewMode] = useState<'cards' | 'list'>(() => {
     if (preferredViewMode) return preferredViewMode;
     const saved = localStorage.getItem('defects_viewMode');
-    return (saved as 'cards' | 'list') || 'cards';
+    return (saved as 'cards' | 'list') || 'list';
   });
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -320,26 +321,57 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
               ))}
             </div>
           ) : (
-            <div className="border rounded-md overflow-hidden">
-              <div className="grid grid-cols-[160px_1fr_160px_160px_160px] items-center px-4 py-2 text-xs uppercase text-muted-foreground bg-muted/40">
-                <div>ID</div>
-                <div>Título</div>
-                <div>Severidade</div>
-                <div>Status</div>
-                <div className="text-right">Ações</div>
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              {/* Header */}
+              <div className="grid grid-cols-[80px_1fr_120px_120px_100px] items-start gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                <div className="pt-px">ID</div>
+                <div className="text-center pt-px">Título</div>
+                <div className="text-center pt-px">Severidade</div>
+                <div className="text-center pt-px">Status</div>
+                <div className="flex justify-end">Ações</div>
               </div>
-              {filtered.map((d) => (
-                <div key={d.id} className="grid grid-cols-[160px_1fr_160px_160px_160px] items-center px-4 py-3 border-t hover:bg-muted/30">
-                  <div className="text-sm font-mono">#{d.id.slice(0, 8)}</div>
-                  <div className="font-medium">{d.title}</div>
-                  <div><Badge className={severityBadgeClass(d.severity)}>{severityLabel(d.severity)}</Badge></div>
-                  <div><Badge className={defectStatusBadgeClass(d.status)}>{defectStatusLabel(d.status)}</Badge></div>
-                  <div className="flex justify-end gap-2">
-                    <StandardButton size="sm" variant="outline" icon={Pencil} onClick={() => openEdit(d)}>Editar</StandardButton>
-                    <StandardButton size="sm" variant="outline" icon={Trash2} onClick={() => remove(d.id)}>Excluir</StandardButton>
+              {/* Rows */}
+              <div className="divide-y divide-border">
+                {filtered.map((d) => (
+                  <div key={d.id} className="grid grid-cols-[80px_1fr_120px_120px_100px] items-start gap-4 px-4 py-3 hover:bg-muted/30 transition-colors">
+                    {/* ID */}
+                    <div className="flex items-center">
+                      <span className="text-xs font-mono bg-brand/10 text-brand px-2 py-1 rounded">{`DEF-${(d.id || '').slice(0,4)}`}</span>
+                    </div>
+                    {/* Título */}
+                    <div className="font-medium text-center flex items-center justify-center min-w-0">
+                      <span className="truncate">{d.title}</span>
+                    </div>
+                    {/* Severidade */}
+                    <div className="flex items-center justify-center"><Badge className={severityBadgeClass(d.severity)}>{severityLabel(d.severity)}</Badge></div>
+                    {/* Status */}
+                    <div className="flex items-center justify-center"><Badge className={defectStatusBadgeClass(d.status)}>{defectStatusLabel(d.status)}</Badge></div>
+                    {/* Ações */}
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEdit(d)}
+                        className="h-8 w-8 p-0"
+                        title="Editar"
+                        aria-label="Editar"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => remove(d.id)}
+                        className="h-8 w-8 p-0 text-destructive hover:text-destructive/80"
+                        title="Excluir"
+                        aria-label="Excluir"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
         </>

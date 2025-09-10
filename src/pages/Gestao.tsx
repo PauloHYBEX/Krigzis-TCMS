@@ -14,9 +14,9 @@ export const Gestao = () => {
     return 'requirements';
   });
   const [tabView, setTabView] = useState<{requirements: 'cards'|'list'; traceability: 'cards'|'list'; defects: 'cards'|'list' }>({
-    requirements: 'cards',
-    traceability: 'cards',
-    defects: 'cards',
+    requirements: 'list',
+    traceability: 'list',
+    defects: 'list',
   });
 
   // Sincroniza a aba com a URL

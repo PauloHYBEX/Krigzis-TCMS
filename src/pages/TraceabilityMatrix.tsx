@@ -37,7 +37,7 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
   const [viewMode, setViewMode] = useState<'cards' | 'list'>(() => {
     if (preferredViewMode) return preferredViewMode;
     const saved = localStorage.getItem('traceability_viewMode');
-    return (saved as 'cards' | 'list') || 'cards';
+    return (saved as 'cards' | 'list') || 'list';
   });
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -246,31 +246,40 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
               })}
             </div>
           ) : (
-            <div className="border rounded-md overflow-hidden">
-              <div className="grid grid-cols-[160px_1fr_160px_160px_180px] items-center px-4 py-2 text-xs uppercase text-muted-foreground bg-muted/40">
-                <div>ID</div>
-                <div>Título</div>
-                <div>Prioridade</div>
-                <div>Status</div>
-                <div className="text-right">Vínculos / Ações</div>
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              {/* Header */}
+              <div className="grid grid-cols-[80px_1fr_120px_120px_140px] items-start gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                <div className="pt-px">ID</div>
+                <div className="text-center pt-px">Título</div>
+                <div className="text-center pt-px">Prioridade</div>
+                <div className="text-center pt-px">Status</div>
+                <div className="flex justify-end">Vínculos / Ações</div>
               </div>
+              {/* Rows */}
+              <div className="divide-y divide-border">
               {filteredRequirements.map((req) => {
                 const linkedCount = (linkedByReq[req.id] || []).length;
                 return (
-                  <div key={req.id} className="grid grid-cols-[160px_1fr_160px_160px_180px] items-center px-4 py-3 border-t hover:bg-muted/30">
-                    <div className="text-sm font-mono">#{req.id.slice(0, 8)}</div>
-                    <div className="font-medium">{req.title}</div>
-                    <div><Badge className={priorityBadgeClass(req.priority)}>{priorityLabel(req.priority)}</Badge></div>
-                    <div><Badge className={requirementStatusBadgeClass(req.status)}>{requirementStatusLabel(req.status)}</Badge></div>
-                    <div className="flex items-center justify-end gap-3">
+                  <div key={req.id} className="grid grid-cols-[80px_1fr_120px_120px_140px] items-start gap-4 px-4 py-3 hover:bg-muted/30 transition-colors">
+                    <div className="flex items-center"><span className="text-xs font-mono bg-brand/10 text-brand px-2 py-1 rounded">{`REQ-${(req.id || '').slice(0,4)}`}</span></div>
+                    <div className="text-sm font-medium leading-tight text-center flex items-center justify-center min-w-0"><span className="truncate">{req.title}</span></div>
+                    <div className="flex items-center justify-center"><Badge className={priorityBadgeClass(req.priority)}>{priorityLabel(req.priority)}</Badge></div>
+                    <div className="flex items-center justify-center"><Badge className={requirementStatusBadgeClass(req.status)}>{requirementStatusLabel(req.status)}</Badge></div>
+                    <div className="flex items-center justify-end gap-2">
                       <span className="text-sm text-muted-foreground">{linkedCount} vínculos</span>
-                      <StandardButton size="sm" icon={Cog} onClick={() => openManage(req.id)}>
-                        Gerenciar
-                      </StandardButton>
+                      <StandardButton
+                        size="sm"
+                        icon={Cog}
+                        iconOnly
+                        ariaLabel="Gerenciar vínculos"
+                        onClick={() => openManage(req.id)}
+                        className="h-8 w-8 p-0"
+                      />
                     </div>
                   </div>
                 );
               })}
+              </div>
             </div>
           )}
         </>
