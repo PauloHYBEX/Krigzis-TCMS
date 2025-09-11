@@ -2,12 +2,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Defect } from '@/types';
+import type { TestCase, TestExecution } from '@/types';
+
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   getDefects,
+  getDefectsByProject,
   createDefect,
   updateDefect,
   deleteDefect,
+  getTestExecutionsByProject,
+  getTestCasesByProject,
+  getTestExecutions,
 } from '@/services/supabaseService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -24,13 +30,20 @@ import {
 import SearchableCombobox from '@/components/SearchableCombobox';
 import { Input } from '@/components/ui/input';
 import { ViewModeToggle } from '@/components/ViewModeToggle';
+import { useProject } from '@/contexts/ProjectContext';
+import { usePermissions } from '@/hooks/usePermissions';
 
 export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewModeChange }: { embedded?: boolean; preferredViewMode?: 'cards'|'list'; onPreferredViewModeChange?: (m: 'cards'|'list') => void; }) => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { currentProject } = useProject();
+  const { hasPermission } = usePermissions();
   const location = useLocation();
   const navigate = useNavigate();
   const [defects, setDefects] = useState<Defect[]>([]);
+  const [executionCaseMap, setExecutionCaseMap] = useState<Record<string, string>>({});
+  const [projectCases, setProjectCases] = useState<TestCase[]>([]);
+  const [caseExecutions, setCaseExecutions] = useState<TestExecution[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Defect | null>(null);
@@ -40,16 +53,38 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
     return (saved as 'cards' | 'list') || 'list';
   });
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterCaseIds, setFilterCaseIds] = useState<string[]>([]);
 
   // Form state
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState<Defect['severity']>('medium');
   const [status, setStatus] = useState<Defect['status']>('open');
+  const [caseId, setCaseId] = useState<string>('');
+  const [executionId, setExecutionId] = useState<string>('');
+  const clearCaseFilter = () => {
+    setFilterCaseIds([]);
+    const params = new URLSearchParams(location.search);
+    params.delete('cases');
+    navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
+  };
 
   useEffect(() => {
     if (user) loadData();
-  }, [user]);
+  }, [user, currentProject?.id]);
+
+  // Quando o caso selecionado muda, carregar execuções daquele caso
+  useEffect(() => {
+    if (!user) return;
+    if (caseId) {
+      getTestExecutions(user.id, undefined, caseId)
+        .then(list => setCaseExecutions(list))
+        .catch(() => setCaseExecutions([]));
+    } else {
+      setCaseExecutions([]);
+      setExecutionId('');
+    }
+  }, [caseId, user?.id]);
 
   useEffect(() => {
     localStorage.setItem('defects_viewMode', viewMode);
@@ -67,9 +102,23 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const id = params.get('id');
+    const openCreateFlag = params.get('openCreate');
+    const casesParam = params.get('cases');
+    if (casesParam) {
+      const ids = casesParam.split(',').map(s => s.trim()).filter(Boolean);
+      setFilterCaseIds(ids);
+    } else {
+      setFilterCaseIds([]);
+    }
     if (id && defects.length > 0) {
       const d = defects.find(x => x.id === id);
       if (d) openEdit(d);
+    }
+    if (openCreateFlag === '1') {
+      openCreate();
+      // limpar flag após abrir para evitar reabertura
+      params.delete('openCreate');
+      navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search, defects]);
@@ -78,6 +127,10 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
     const params = new URLSearchParams(location.search);
     if (params.has('id')) {
       params.delete('id');
+      navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
+    }
+    if (params.has('openCreate')) {
+      params.delete('openCreate');
       navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
     }
   };
@@ -91,8 +144,24 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
   const loadData = async () => {
     try {
       setLoading(true);
-      const data = await getDefects(user!.id);
-      setDefects(data);
+      const [defList, execList, projCases] = await Promise.all([
+        currentProject?.id
+          ? getDefectsByProject(user!.id, currentProject.id)
+          : getDefects(user!.id),
+        currentProject?.id
+          ? getTestExecutionsByProject(user!.id, currentProject.id)
+          : Promise.resolve([] as TestExecution[]),
+        currentProject?.id
+          ? getTestCasesByProject(user!.id, currentProject.id)
+          : Promise.resolve([] as TestCase[]),
+      ]);
+      setDefects(defList as Defect[]);
+      const map: Record<string, string> = {};
+      for (const e of execList as TestExecution[]) {
+        if ((e as any).id && (e as any).case_id) map[(e as any).id] = (e as any).case_id;
+      }
+      setExecutionCaseMap(map);
+      setProjectCases(projCases as TestCase[]);
     } catch (e: any) {
       toast({ title: 'Erro', description: e.message || 'Falha ao carregar defeitos', variant: 'destructive' });
     } finally {
@@ -106,6 +175,9 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
     setDescription('');
     setSeverity('medium');
     setStatus('open');
+    setCaseId('');
+    setExecutionId('');
+    setCaseExecutions([]);
     setShowForm(true);
     clearIdParam();
   };
@@ -116,21 +188,33 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
     setDescription(d.description);
     setSeverity(d.severity);
     setStatus(d.status);
+    setCaseId(d.case_id || '');
+    setExecutionId(d.execution_id || '');
     setShowForm(true);
     const params = new URLSearchParams(location.search);
     params.set('id', d.id);
     navigate({ pathname: location.pathname, search: params.toString() }, { replace: false });
+    // carregar execuções do caso (se houver)
+    if (d.case_id && user) {
+      getTestExecutions(user.id, undefined, d.case_id).then(execList => setCaseExecutions(execList)).catch(() => setCaseExecutions([]));
+    } else {
+      setCaseExecutions([]);
+    }
   };
 
   const submit = async () => {
     try {
       if (!user) return;
       if (editing) {
-        const updated = await updateDefect(editing.id, { title, description, severity, status });
+        const updated = await updateDefect(editing.id, { title, description, severity, status, case_id: caseId || null, execution_id: executionId || null } as any);
         setDefects(prev => prev.map(r => r.id === updated.id ? updated : r));
         toast({ title: 'Atualizado', description: 'Defeito atualizado com sucesso.' });
       } else {
-        const created = await createDefect({ user_id: user.id, title, description, severity, status } as any);
+        if (!currentProject?.id) {
+          toast({ title: 'Selecione um projeto', description: 'É necessário selecionar um projeto para criar defeitos.', variant: 'destructive' });
+          return;
+        }
+        const created = await createDefect({ user_id: user.id, project_id: currentProject.id, title, description, severity, status, case_id: caseId || null, execution_id: executionId || null } as any);
         setDefects(prev => [created, ...prev]);
         toast({ title: 'Criado', description: 'Defeito criado com sucesso.' });
       }
@@ -152,13 +236,21 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
 
   const filtered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
-    if (!q) return defects;
-    return defects.filter(d =>
+    const base = defects.filter(d => {
+      if (filterCaseIds.length > 0) {
+        const byCase = !!d.case_id && filterCaseIds.includes(d.case_id);
+        const byExec = !!d.execution_id && !!executionCaseMap[d.execution_id] && filterCaseIds.includes(executionCaseMap[d.execution_id]);
+        return byCase || byExec;
+      }
+      return true;
+    });
+    if (!q) return base;
+    return base.filter(d =>
       (d.title || '').toLowerCase().includes(q) ||
       (d.description || '').toLowerCase().includes(q) ||
       (d.id || '').toLowerCase().includes(q)
     );
-  }, [defects, searchTerm]);
+  }, [defects, searchTerm, filterCaseIds, executionCaseMap]);
 
   if (loading) {
     return (
@@ -178,14 +270,16 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
             </h2>
             <p className="text-gray-600 dark:text-gray-400">Gerencie seus defeitos/incidentes</p>
           </div>
-          <StandardButton 
-            variant="brand" 
-            icon={Plus} 
-            onClick={openCreate}
-            className="rounded-full px-4 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
-          >
-            Novo Defeito
-          </StandardButton>
+          {hasPermission('can_manage_executions') && (
+            <StandardButton 
+              variant="brand" 
+              icon={Plus} 
+              onClick={openCreate}
+              className="rounded-full px-4 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
+            >
+              Novo Defeito
+            </StandardButton>
+          )}
         </div>
       )}
 
@@ -201,12 +295,16 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
           />
         </div>
         <div className="flex items-center gap-3">
+          {filterCaseIds.length > 0 && (
+            <div className="flex items-center gap-2 border rounded px-2 py-1 text-xs text-muted-foreground">
+              <span>{filterCaseIds.length} caso(s) filtrado(s)</span>
+              <Button variant="outline" size="sm" onClick={clearCaseFilter} className="h-7 px-2 text-xs">Limpar</Button>
+            </div>
+          )}
           {!embedded && (
             <ViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
           )}
-          {embedded && (
-            <StandardButton variant="brand" icon={Plus} onClick={openCreate}>Novo Defeito</StandardButton>
-          )}
+          {/* Quando embedded, o botão '+ Novo' fica no cabeçalho de Gestão. */}
         </div>
       </div>
 
@@ -226,7 +324,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
               <label className="block text-sm mb-1">Descrição</label>
               <textarea className="w-full rounded-md border p-2 bg-background" rows={4} value={description} onChange={e => setDescription(e.target.value)} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm mb-1">Severidade</label>
                 <SearchableCombobox
@@ -257,9 +355,36 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
                 />
               </div>
             </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm mb-1">Caso relacionado (opcional)</label>
+                <SearchableCombobox
+                  items={projectCases.map(c => ({ value: c.id, label: `${c.sequence ? `#${c.sequence} ` : ''}${c.title}` }))}
+                  value={caseId}
+                  onChange={(value) => { setCaseId(value || ''); }}
+                  placeholder="Selecione um caso (opcional)"
+                />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Execução (opcional)</label>
+                <SearchableCombobox
+                  items={caseExecutions.map(e => ({ value: e.id, label: `${new Date(e.executed_at).toLocaleString()} • ${e.status}` }))}
+                  value={executionId}
+                  onChange={(value) => { setExecutionId(value || ''); }}
+                  placeholder={caseId ? 'Selecione uma execução (opcional)' : 'Selecione um caso primeiro'}
+                  disabled={!caseId}
+                />
+              </div>
+            </div>
             <div className="flex justify-end gap-2">
               <StandardButton variant="outline" onClick={closeForm}>Cancelar</StandardButton>
-              <StandardButton onClick={submit}>{editing ? 'Salvar' : 'Criar'}</StandardButton>
+              <StandardButton 
+                onClick={submit}
+                disabled={!hasPermission('can_manage_executions')}
+                className={!editing ? 'bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0' : ''}
+              >
+                {editing ? 'Salvar' : 'Criar'}
+              </StandardButton>
             </div>
           </div>
         </DialogContent>
@@ -294,26 +419,30 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
                     <div className="mt-auto flex items-center justify-between">
                       <div className="text-xs text-muted-foreground">#{d.id.slice(0, 8)}</div>
                       <div className="flex gap-1">
-                        <StandardButton 
-                          variant="ghost" 
-                          size="sm" 
-                          compact 
-                          iconOnly 
-                          ariaLabel="Editar"
-                          icon={Pencil}
-                          onClick={() => openEdit(d)}
-                          className="h-8 w-8"
-                        />
-                        <StandardButton 
-                          variant="ghost" 
-                          size="sm" 
-                          compact 
-                          iconOnly 
-                          ariaLabel="Excluir"
-                          icon={Trash2}
-                          onClick={() => remove(d.id)}
-                          className="h-8 w-8 text-destructive hover:text-destructive/90"
-                        />
+                        {hasPermission('can_manage_executions') && (
+                          <StandardButton 
+                            variant="ghost" 
+                            size="sm" 
+                            compact 
+                            iconOnly 
+                            ariaLabel="Editar"
+                            icon={Pencil}
+                            onClick={() => openEdit(d)}
+                            className="h-8 w-8"
+                          />
+                        )}
+                        {hasPermission('can_manage_executions') && (
+                          <StandardButton 
+                            variant="ghost" 
+                            size="sm" 
+                            compact 
+                            iconOnly 
+                            ariaLabel="Excluir"
+                            icon={Trash2}
+                            onClick={() => remove(d.id)}
+                            className="h-8 w-8"
+                          />
+                        )}
                       </div>
                     </div>
                   </CardContent>
@@ -348,26 +477,30 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
                     <div className="flex items-center justify-center"><Badge className={defectStatusBadgeClass(d.status)}>{defectStatusLabel(d.status)}</Badge></div>
                     {/* Ações */}
                     <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEdit(d)}
-                        className="h-8 w-8 p-0"
-                        title="Editar"
-                        aria-label="Editar"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => remove(d.id)}
-                        className="h-8 w-8 p-0 text-destructive hover:text-destructive/80"
-                        title="Excluir"
-                        aria-label="Excluir"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {hasPermission('can_manage_executions') && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openEdit(d)}
+                          className="h-8 w-8 p-0"
+                          title="Editar"
+                          aria-label="Editar"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      )}
+                      {hasPermission('can_manage_executions') && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => remove(d.id)}
+                          className="h-8 w-8 p-0"
+                          title="Excluir"
+                          aria-label="Excluir"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}

@@ -21,7 +21,6 @@ export const DatabaseSetup = () => {
   const [formData, setFormData] = useState<DatabaseSetupRequest>({
     supabaseUrl: '',
     supabaseKey: '',
-    organizationName: '',
     aiApiKey: ''
   });
 
@@ -66,10 +65,10 @@ export const DatabaseSetup = () => {
       return;
     }
 
-    if (!formData.supabaseUrl || !formData.supabaseKey || !formData.organizationName) {
+    if (!formData.supabaseUrl || !formData.supabaseKey) {
       toast({
         title: 'Campos obrigatórios',
-        description: 'Preencha todos os campos obrigatórios',
+        description: 'Preencha a URL e a chave do Supabase',
         variant: 'destructive'
       });
       return;
@@ -83,7 +82,7 @@ export const DatabaseSetup = () => {
       if (result.success) {
         toast({
           title: 'Sucesso!',
-          description: result.message || 'Base de dados configurada com sucesso!',
+          description: result.message || 'Estrutura de base validada com sucesso!',
         });
 
         await checkDatabaseSetup();
@@ -91,7 +90,6 @@ export const DatabaseSetup = () => {
         setFormData({
           supabaseUrl: '',
           supabaseKey: '',
-          organizationName: '',
           aiApiKey: ''
         });
       } else {
@@ -146,7 +144,7 @@ export const DatabaseSetup = () => {
   };
 
   const downloadSQLFile = () => {
-    const sqlContent = `-- QualityCore AI - Database Setup Script
+    const sqlContent = `-- Krigzis-TCMS - Database Setup Script (versão simplificada, sem Organizações/To-Do)
 -- Execute este script no Supabase SQL Editor
 
 -- 1. Criar enum de roles
@@ -163,12 +161,11 @@ CREATE TABLE IF NOT EXISTS profiles (
     display_name TEXT,
     email TEXT,
     role user_role DEFAULT 'viewer',
-    organization_id UUID,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. Tabela de permissões
+-- 3. Tabela de permissões (escopo global por usuário)
 CREATE TABLE IF NOT EXISTS user_permissions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -183,21 +180,21 @@ CREATE TABLE IF NOT EXISTS user_permissions (
     can_test_ai_connections BOOLEAN DEFAULT FALSE,
     can_manage_ai_templates BOOLEAN DEFAULT FALSE,
     can_select_ai_models BOOLEAN DEFAULT FALSE,
-    organization_id UUID,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(user_id, organization_id)
+    UNIQUE(user_id)
 );
 
--- RLS policies e triggers omitidos para brevidade
--- Execute o script completo baixado no Supabase
+-- Habilitar RLS (políticas completas no arquivo de configuração principal)
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_permissions ENABLE ROW LEVEL SECURITY;
 `;
 
     const blob = new Blob([sqlContent], { type: 'text/sql' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'qualitycore-database-setup.sql';
+    a.download = 'krigzis-tcms-database-setup.sql';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -232,10 +229,6 @@ CREATE TABLE IF NOT EXISTS user_permissions (
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <Label className="text-sm text-muted-foreground">Organização</Label>
-                <p className="font-medium">{currentConfig.organizationName}</p>
-              </div>
               <div>
                 <Label className="text-sm text-muted-foreground">URL do Supabase</Label>
                 <p className="font-mono text-sm break-all">{currentConfig.supabaseUrl}</p>
@@ -352,18 +345,6 @@ CREATE TABLE IF NOT EXISTS user_permissions (
                   placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
                   value={formData.supabaseKey}
                   onChange={(e) => handleInputChange('supabaseKey', e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="organizationName">Nome da Organização *</Label>
-                <Input
-                  id="organizationName"
-                  type="text"
-                  placeholder="Minha Empresa"
-                  value={formData.organizationName}
-                  onChange={(e) => handleInputChange('organizationName', e.target.value)}
                   required
                 />
               </div>

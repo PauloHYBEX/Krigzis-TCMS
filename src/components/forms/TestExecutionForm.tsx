@@ -318,7 +318,11 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
                 Cancelar
               </Button>
             )}
-            <Button type="submit" disabled={loading || !formData.case_id || !formData.plan_id} className="bg-brand hover:bg-brand/90 text-white">
+            <Button
+              type="submit"
+              disabled={loading || !formData.case_id || !formData.plan_id}
+              className={isEdit ? 'bg-brand hover:bg-brand/90 text-white' : 'bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0'}
+            >
               {loading ? (isEdit ? 'Salvando...' : 'Registrando...') : (isEdit ? 'Salvar Alterações' : 'Registrar Execução')}
             </Button>
           </div>

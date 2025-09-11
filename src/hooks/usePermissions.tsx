@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './useAuth';
 import { supabase } from '@/integrations/supabase/client';
-import { OrganizationService } from '@/services/organizationService';
 
 // Single-tenant mode: when true, we bypass remote permissions and force master permissions
 // Default to true if env is missing (safer for private/single setup)
@@ -156,7 +155,7 @@ export const PermissionsProvider = ({ children }: PermissionsProviderProps) => {
   const [role, setRole] = useState<UserRole>(SINGLE_TENANT ? 'master' : 'viewer');
   const [loading, setLoading] = useState(true);
 
-  const fetchUserRole = async (userId: string, _organizationId?: string) => {
+  const fetchUserRole = async (userId: string) => {
     if (SINGLE_TENANT) return 'master' as UserRole;
     try {
       const { data, error } = await supabase
@@ -173,7 +172,7 @@ export const PermissionsProvider = ({ children }: PermissionsProviderProps) => {
     }
   };
 
-  const fetchUserPermissions = async (userId: string, _organizationId?: string) => {
+  const fetchUserPermissions = async (userId: string) => {
     if (SINGLE_TENANT) return getDefaultPermissions('master');
     try {
       const { data, error } = await supabase
@@ -212,13 +211,9 @@ export const PermissionsProvider = ({ children }: PermissionsProviderProps) => {
 
     setLoading(true);
     try {
-      // Fetch current organization (multi-tenant context)
-      const orgInfo = await OrganizationService.getCurrentUserOrganization();
-      const orgId = orgInfo?.organization?.id;
-
       const [userRole, userPermissions] = await Promise.all([
-        fetchUserRole(user.id, orgId),
-        fetchUserPermissions(user.id, orgId)
+        fetchUserRole(user.id),
+        fetchUserPermissions(user.id)
       ]);
 
       setRole(userRole);
@@ -238,10 +233,6 @@ export const PermissionsProvider = ({ children }: PermissionsProviderProps) => {
       return;
     }
     try {
-      // Resolve current organization context
-      const orgInfo = await OrganizationService.getCurrentUserOrganization();
-      const orgId = orgInfo?.organization?.id;
-
       // Backward-compat: try to set profiles.role as master too
       const { error: profileError } = await supabase
         .from('profiles')
@@ -251,38 +242,16 @@ export const PermissionsProvider = ({ children }: PermissionsProviderProps) => {
         console.warn('Warning updating profiles.role to master:', profileError);
       }
 
-      // If we have org context, set org membership role; permissions are now global (no org scope)
-      if (orgId) {
-        const { error: memberError } = await supabase
-          .from('organization_members')
-          .update({ role: 'master', status: 'active' })
-          .eq('organization_id', orgId)
-          .eq('user_id', userId);
-        if (memberError) {
-          console.warn('Warning updating organization member role to master:', memberError);
-        }
-        const masterPermissions = getDefaultPermissions('master');
-        const { error: permissionsError } = await supabase
-          .from('user_permissions')
-          .upsert({
-            user_id: userId,
-            ...masterPermissions,
-          }, { onConflict: 'user_id' });
-        if (permissionsError) {
-          console.warn('Warning upserting master permissions:', permissionsError);
-        }
-      } else {
-        // Fallback: unscoped permissions (older schema)
-        const masterPermissions = getDefaultPermissions('master');
-        const { error: permissionsError } = await supabase
-          .from('user_permissions')
-          .upsert({
-            user_id: userId,
-            ...masterPermissions,
-          }, { onConflict: 'user_id' });
-        if (permissionsError) {
-          console.warn('Warning upserting master permissions (no org):', permissionsError);
-        }
+      // Permissions are global per user now (no organizations)
+      const masterPermissions = getDefaultPermissions('master');
+      const { error: permissionsError } = await supabase
+        .from('user_permissions')
+        .upsert({
+          user_id: userId,
+          ...masterPermissions,
+        }, { onConflict: 'user_id' });
+      if (permissionsError) {
+        console.warn('Warning upserting master permissions:', permissionsError);
       }
 
       if (user && user.id === userId) {

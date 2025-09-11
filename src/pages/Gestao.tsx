@@ -5,9 +5,13 @@ import { TraceabilityMatrix } from '@/pages/TraceabilityMatrix';
 import { Defects } from '@/pages/Defects';
 import { useSearchParams } from 'react-router-dom';
 import { ViewModeToggle } from '@/components/ViewModeToggle';
+import { StandardButton } from '@/components/StandardButton';
+import { Plus } from 'lucide-react';
+import { usePermissions } from '@/hooks/usePermissions';
 
 export const Gestao = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { hasPermission } = usePermissions();
   const [tab, setTab] = useState<'requirements' | 'traceability' | 'defects'>(() => {
     const t = (searchParams.get('tab') || 'requirements') as any;
     if (t === 'traceability' || t === 'defects' || t === 'requirements') return t;
@@ -36,12 +40,45 @@ export const Gestao = () => {
     setSearchParams(params);
   };
 
+  const handleCreate = () => {
+    const params = new URLSearchParams(searchParams);
+    // Sinalizar abertura de criação na aba atual
+    if (tab === 'requirements') {
+      params.set('openCreate', '1');
+      setSearchParams(params);
+      return;
+    }
+    if (tab === 'defects') {
+      params.set('openCreate', '1');
+      setSearchParams(params);
+      return;
+    }
+    // Na aba de rastreabilidade, redirecionar para Requisitos e abrir criação
+    if (tab === 'traceability') {
+      params.set('tab', 'requirements');
+      params.set('openCreate', '1');
+      setSearchParams(params);
+      return;
+    }
+  };
+
   return (
     <div className="flex-1 space-y-6 p-6">
       {/* Header padrão como outras páginas */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Gestão</h1>
-        <p className="text-sm text-muted-foreground">Organize requisitos, vínculos e defeitos</p>
+      <div className="flex items-center justify-between">
+        <div className="pl-24">
+          <h1 className="text-2xl font-bold text-foreground">Gestão</h1>
+          <p className="text-sm text-muted-foreground">Organize requisitos, vínculos e defeitos</p>
+        </div>
+        {((tab === 'requirements' || tab === 'traceability') && hasPermission('can_manage_cases')) || (tab === 'defects' && hasPermission('can_manage_executions')) ? (
+          <StandardButton
+            onClick={handleCreate}
+            className="bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            {tab === 'requirements' || tab === 'traceability' ? 'Novo Requisito' : 'Novo Defeito'}
+          </StandardButton>
+        ) : null}
       </div>
 
       <div className="mt-2">
@@ -58,10 +95,12 @@ export const Gestao = () => {
                 Defeitos
               </TabsTrigger>
             </TabsList>
-            <ViewModeToggle
-              viewMode={tabView[tab]}
-              onViewModeChange={(mode) => setTabView(v => ({ ...v, [tab]: mode }))}
-            />
+            <div className="flex items-center gap-3">
+              <ViewModeToggle
+                viewMode={tabView[tab]}
+                onViewModeChange={(mode) => setTabView(v => ({ ...v, [tab]: mode }))}
+              />
+            </div>
           </div>
 
           <TabsContent value="requirements" className="mt-4">

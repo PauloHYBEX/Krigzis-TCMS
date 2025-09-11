@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,16 +15,16 @@ const DatabaseSetup: React.FC = () => {
   const [formData, setFormData] = useState({
     supabaseUrl: '',
     supabaseKey: '',
-    organizationName: 'Minha Organização',
     aiApiKey: ''
   });
+
   const [isLoading, setIsLoading] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [databaseStatus, setDatabaseStatus] = useState<any>(null);
   const [showSqlHelp, setShowSqlHelp] = useState(false);
   const { toast } = useToast();
-  const { user, checkDatabaseSetup } = useAuth();
+  const { user } = useAuth();
 
   useEffect(() => {
     if (user) {
@@ -135,7 +136,7 @@ const DatabaseSetup: React.FC = () => {
 
     setIsLoading(true);
     try {
-      const result = await DatabaseSetupService.setupUserDatabase(user.id, formData);
+      const result = await DatabaseSetupService.setupUserDatabase(user.id, formData as any);
       
       if (result.success) {
         toast({
@@ -143,11 +144,8 @@ const DatabaseSetup: React.FC = () => {
           description: result.message,
         });
         
-        // Recarregar status do setup no contexto de autenticação
-        await checkDatabaseSetup();
-        
-        // Recarregar página para aplicar nova configuração
-        window.location.reload();
+        // Recarregar status local
+        await loadDatabaseStatus();
       } else {
         toast({
           title: "Erro na configuração",
@@ -184,70 +182,38 @@ CREATE TABLE IF NOT EXISTS profiles (
     display_name TEXT,
     email TEXT,
     avatar_url TEXT,
+    role user_role DEFAULT 'viewer',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Tabela de organizações
-CREATE TABLE IF NOT EXISTS organizations (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    name TEXT NOT NULL,
-    slug TEXT NOT NULL,
-    description TEXT,
-    database_id TEXT UNIQUE NOT NULL,
-    is_active BOOLEAN DEFAULT true,
-    settings JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(slug)
-);
-
--- Tabela de membros da organização
-CREATE TABLE IF NOT EXISTS organization_members (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
-    role user_role DEFAULT 'viewer',
-    status TEXT DEFAULT 'active' CHECK (status IN ('pending', 'active', 'suspended')),
-    joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    invited_by UUID REFERENCES profiles(id),
-    invited_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    accepted_at TIMESTAMP WITH TIME ZONE,
-    UNIQUE(organization_id, user_id)
-);
-
--- Tabela de permissões
+-- Tabela de permissões (escopo global por usuário)
 CREATE TABLE IF NOT EXISTS user_permissions (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
-    organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
-    permissions JSONB DEFAULT '{}',
+    can_manage_users BOOLEAN DEFAULT FALSE,
+    can_manage_plans BOOLEAN DEFAULT FALSE,
+    can_manage_cases BOOLEAN DEFAULT FALSE,
+    can_manage_executions BOOLEAN DEFAULT FALSE,
+    can_view_reports BOOLEAN DEFAULT FALSE,
+    can_use_ai BOOLEAN DEFAULT FALSE,
+    can_access_model_control BOOLEAN DEFAULT FALSE,
+    can_configure_ai_models BOOLEAN DEFAULT FALSE,
+    can_test_ai_connections BOOLEAN DEFAULT FALSE,
+    can_manage_ai_templates BOOLEAN DEFAULT FALSE,
+    can_select_ai_models BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(user_id, organization_id)
+    UNIQUE(user_id)
 );
 
--- Configurar RLS
+-- Habilitar RLS
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE organization_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_permissions ENABLE ROW LEVEL SECURITY;
 
 -- Políticas básicas
 CREATE POLICY "Users can manage own profile" ON profiles FOR ALL USING (auth.uid() = id);
-CREATE POLICY "Members can view organization" ON organizations FOR SELECT USING (EXISTS (
-    SELECT 1 FROM organization_members WHERE organization_id = organizations.id AND user_id = auth.uid() AND status = 'active'
-));
-CREATE POLICY "Masters can manage organization" ON organizations FOR ALL USING (EXISTS (
-    SELECT 1 FROM organization_members WHERE organization_id = organizations.id AND user_id = auth.uid() AND role = 'master' AND status = 'active'
-));
-CREATE POLICY "Members can view org members" ON organization_members FOR SELECT USING (EXISTS (
-    SELECT 1 FROM organization_members om WHERE om.organization_id = organization_members.organization_id AND om.user_id = auth.uid() AND om.status = 'active'
-));
-CREATE POLICY "Admins can manage members" ON organization_members FOR ALL USING (EXISTS (
-    SELECT 1 FROM organization_members om WHERE om.organization_id = organization_members.organization_id AND om.user_id = auth.uid() AND om.role IN ('master', 'admin') AND om.status = 'active'
-));
-CREATE POLICY "Users can view own permissions" ON user_permissions FOR SELECT USING (user_id = auth.uid());
+CREATE POLICY "Users can manage own permissions" ON user_permissions FOR ALL USING (user_id = auth.uid());
 
 -- Criar perfil automático
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -404,17 +370,6 @@ CREATE TRIGGER on_auth_user_created
                   required
                 />
               </div>
-            </div>
-
-            <div>
-              <Label htmlFor="organization-name">Nome da Organização *</Label>
-              <Input
-                id="organization-name"
-                placeholder="Minha Empresa"
-                value={formData.organizationName}
-                onChange={(e) => setFormData(prev => ({ ...prev, organizationName: e.target.value }))}
-                required
-              />
             </div>
 
             <div>

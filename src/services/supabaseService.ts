@@ -26,6 +26,50 @@ export const getTestPlans = async (userId: string, projectId?: string): Promise<
   }));
 };
 
+// Busca defeitos por projeto atual diretamente na tabela (coluna project_id)
+export const getDefectsByProject = async (userId: string, projectId: string): Promise<Defect[]> => {
+  const { data, error } = await supabase
+    .from('defects')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('project_id', projectId)
+    .order('updated_at', { ascending: false });
+  if (error) {
+    console.error('Erro ao buscar defeitos por projeto:', error);
+    throw error;
+  }
+  return (data || []).map((d: any) => ({
+    ...d,
+    created_at: new Date(d.created_at),
+    updated_at: new Date(d.updated_at),
+    status: d.status as Defect['status'],
+    severity: d.severity as Defect['severity']
+  }));
+};
+
+// Versão filtrada por projeto para requisitos
+export const getRequirementsByProject = async (userId: string, projectId: string): Promise<Requirement[]> => {
+  const { data, error } = await supabase
+    .from('requirements')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('project_id', projectId)
+    .order('updated_at', { ascending: false });
+
+  if (error) {
+    console.error('Erro ao buscar requisitos por projeto:', error);
+    throw error;
+  }
+
+  return (data || []).map((r: any) => ({
+    ...r,
+    created_at: new Date(r.created_at),
+    updated_at: new Date(r.updated_at),
+    priority: r.priority as Requirement['priority'],
+    status: r.status as Requirement['status']
+  }));
+};
+
 // ===== Contadores por Caso =====
 export const countExecutionsByCase = async (userId: string, caseId: string): Promise<number> => {
   const { count, error } = await supabase

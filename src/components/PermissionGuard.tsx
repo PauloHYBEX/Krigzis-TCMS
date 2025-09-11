@@ -7,6 +7,8 @@ interface PermissionGuardProps {
   children: ReactNode;
   requiredPermission?: keyof Omit<import('@/hooks/usePermissions').UserPermissions, 'role'>;
   requiredRole?: import('@/hooks/usePermissions').UserRole;
+  anyOfPermissions?: Array<keyof Omit<import('@/hooks/usePermissions').UserPermissions, 'role'>>;
+  allOfPermissions?: Array<keyof Omit<import('@/hooks/usePermissions').UserPermissions, 'role'>>;
   fallback?: ReactNode;
   redirect?: string;
 }
@@ -15,6 +17,8 @@ export const PermissionGuard = ({
   children, 
   requiredPermission, 
   requiredRole,
+  anyOfPermissions,
+  allOfPermissions,
   fallback,
   redirect
 }: PermissionGuardProps) => {
@@ -34,8 +38,11 @@ export const PermissionGuard = ({
     (requiredRole === 'admin' && role === 'master') ||
     (requiredRole === 'manager' && (role === 'master' || role === 'admin'));
 
-  // Check permission requirement
-  const hasRequiredPermission = !requiredPermission || hasPermission(requiredPermission);
+  // Check permission requirement (single + anyOf + allOf)
+  const singleOk = !requiredPermission || hasPermission(requiredPermission);
+  const anyOfOk = !anyOfPermissions || anyOfPermissions.length === 0 || anyOfPermissions.some(p => hasPermission(p));
+  const allOfOk = !allOfPermissions || allOfPermissions.length === 0 || allOfPermissions.every(p => hasPermission(p));
+  const hasRequiredPermission = singleOk && anyOfOk && allOfOk;
 
   // If requirements are met, render children
   if (hasRequiredRole && hasRequiredPermission) {

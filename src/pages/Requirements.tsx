@@ -9,6 +9,7 @@ import {
   updateRequirement,
   deleteRequirement
 } from '@/services/supabaseService';
+import { getRequirementsByProject } from '@/services/supabaseService';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
@@ -24,10 +25,14 @@ import {
 import SearchableCombobox from '@/components/SearchableCombobox';
 import { Input } from '@/components/ui/input';
 import { ViewModeToggle } from '@/components/ViewModeToggle';
+import { useProject } from '@/contexts/ProjectContext';
+import { usePermissions } from '@/hooks/usePermissions';
 
 export const Requirements = ({ embedded = false, preferredViewMode, onPreferredViewModeChange }: { embedded?: boolean; preferredViewMode?: 'cards' | 'list'; onPreferredViewModeChange?: (m: 'cards'|'list') => void; }) => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { currentProject } = useProject();
+  const { hasPermission } = usePermissions();
   const location = useLocation();
   const navigate = useNavigate();
   const [requirements, setRequirements] = useState<Requirement[]>([]);
@@ -51,7 +56,7 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
     if (user) {
       loadData();
     }
-  }, [user]);
+  }, [user, currentProject?.id]);
 
   useEffect(() => {
     localStorage.setItem('requirements_viewMode', viewMode);
@@ -69,11 +74,18 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const id = params.get('id');
+    const openCreateFlag = params.get('openCreate');
     if (id && requirements.length > 0) {
       const req = requirements.find(r => r.id === id);
       if (req) {
         openEdit(req);
       }
+    }
+    if (openCreateFlag === '1') {
+      openCreate();
+      // limpar flag para evitar abrir repetidamente
+      params.delete('openCreate');
+      navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search, requirements]);
@@ -82,6 +94,10 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
     const params = new URLSearchParams(location.search);
     if (params.has('id')) {
       params.delete('id');
+      navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
+    }
+    if (params.has('openCreate')) {
+      params.delete('openCreate');
       navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
     }
   };
@@ -95,7 +111,9 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
   const loadData = async () => {
     try {
       setLoading(true);
-      const data = await getRequirements(user!.id);
+      const data = currentProject?.id
+        ? await getRequirementsByProject(user!.id, currentProject.id)
+        : await getRequirements(user!.id);
       setRequirements(data);
     } catch (e: any) {
       toast({ title: 'Erro', description: e.message || 'Falha ao carregar requisitos', variant: 'destructive' });
@@ -136,7 +154,11 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
         setRequirements(prev => prev.map(r => r.id === updated.id ? updated : r));
         toast({ title: 'Atualizado', description: 'Requisito atualizado com sucesso.' });
       } else {
-        const created = await createRequirement({ user_id: user.id, title, description, priority, status } as any);
+        if (!currentProject?.id) {
+          toast({ title: 'Selecione um projeto', description: 'É necessário selecionar um projeto para criar requisitos.', variant: 'destructive' });
+          return;
+        }
+        const created = await createRequirement({ user_id: user.id, project_id: currentProject.id, title, description, priority, status } as any);
         setRequirements(prev => [created, ...prev]);
         toast({ title: 'Criado', description: 'Requisito criado com sucesso.' });
       }
@@ -188,16 +210,18 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
               closeForm();
             }
           }}>
-            <DialogTrigger asChild>
-              <StandardButton 
-                variant="brand" 
-                icon={Plus} 
-                onClick={openCreate}
-                className="rounded-full px-4 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
-              >
-                Novo Requisito
-              </StandardButton>
-            </DialogTrigger>
+            {hasPermission('can_manage_cases') && (
+              <DialogTrigger asChild>
+                <StandardButton 
+                  variant="brand" 
+                  icon={Plus} 
+                  onClick={openCreate}
+                  className="rounded-full px-4 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
+                >
+                  Novo Requisito
+                </StandardButton>
+              </DialogTrigger>
+            )}
             <DialogContent className="max-w-2xl">
               <DialogHeader>
                 <DialogTitle>{editing ? 'Editar Requisito' : 'Novo Requisito'}</DialogTitle>
@@ -244,7 +268,12 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
                 </div>
                 <div className="flex justify-end gap-2">
                   <StandardButton variant="outline" onClick={closeForm}>Cancelar</StandardButton>
-                  <StandardButton onClick={submit}>{editing ? 'Salvar' : 'Criar'}</StandardButton>
+                  <StandardButton 
+                    onClick={submit}
+                    className={!editing ? 'bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0' : ''}
+                  >
+                    {editing ? 'Salvar' : 'Criar'}
+                  </StandardButton>
                 </div>
               </div>
             </DialogContent>
@@ -301,7 +330,13 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
               </div>
               <div className="flex justify-end gap-2">
                 <StandardButton variant="outline" onClick={closeForm}>Cancelar</StandardButton>
-                <StandardButton onClick={submit}>{editing ? 'Salvar' : 'Criar'}</StandardButton>
+                <StandardButton 
+                  onClick={submit}
+                  disabled={!hasPermission('can_manage_cases')}
+                  className={!editing ? 'bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0' : ''}
+                >
+                  {editing ? 'Salvar' : 'Criar'}
+                </StandardButton>
               </div>
               </div>
             </DialogContent>
@@ -324,17 +359,7 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
           {!embedded && (
             <ViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
           )}
-          {embedded && (
-            <StandardButton 
-              variant="brand" 
-              size="sm"
-              icon={Plus} 
-              onClick={openCreate}
-              className="rounded-full px-4 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
-            >
-              Novo Requisito
-            </StandardButton>
-          )}
+          {/* Quando embedded, o botão '+ Novo' fica no cabeçalho de Gestão. */}
         </div>
       </div>
 
@@ -368,6 +393,7 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
                   <CardFooter className="p-4 pt-0 mt-auto flex items-center justify-between">
                     <div className="text-xs text-muted-foreground">#{req.id.slice(0, 8)}</div>
                     <div className="flex gap-1">
+                      {hasPermission('can_manage_cases') && (
                       <StandardButton
                         variant="ghost"
                         size="sm"
@@ -377,7 +403,8 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
                         icon={Pencil}
                         onClick={() => openEdit(req)}
                         className="h-8 w-8"
-                      />
+                      />)}
+                      {hasPermission('can_manage_cases') && (
                       <StandardButton
                         variant="ghost"
                         size="sm"
@@ -386,8 +413,8 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
                         ariaLabel="Excluir"
                         icon={Trash2}
                         onClick={() => remove(req.id)}
-                        className="h-8 w-8 text-destructive hover:text-destructive/90"
-                      />
+                        className="h-8 w-8"
+                      />)}
                     </div>
                   </CardFooter>
                 </Card>
@@ -425,6 +452,7 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
                     </div>
                     {/* Ações */}
                     <div className="flex items-center justify-end gap-1">
+                      {hasPermission('can_manage_cases') && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -434,17 +462,18 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
                         aria-label="Editar"
                       >
                         <Pencil className="h-4 w-4" />
-                      </Button>
+                      </Button>)}
+                      {hasPermission('can_manage_cases') && (
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => remove(req.id)}
-                        className="h-8 w-8 p-0 text-destructive hover:text-destructive/80"
+                        className="h-8 w-8 p-0"
                         title="Excluir"
                         aria-label="Excluir"
                       >
                         <Trash2 className="h-4 w-4" />
-                      </Button>
+                      </Button>)}
                     </div>
                   </div>
                 ))}

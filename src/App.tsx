@@ -59,7 +59,14 @@ function AppRouter() {
         <Route path="/cases" element={<PermissionGuard requiredPermission="can_manage_cases"><TestCases /></PermissionGuard>} />
         <Route path="/executions" element={<PermissionGuard requiredPermission="can_manage_executions"><TestExecutions /></PermissionGuard>} />
         {/* Nova página Gestão com abas */}
-        <Route path="/management" element={<PermissionGuard><Gestao /></PermissionGuard>} />
+        <Route 
+          path="/management" 
+          element={
+            <PermissionGuard anyOfPermissions={["can_manage_cases", "can_manage_executions"]} redirect="/">
+              <Gestao />
+            </PermissionGuard>
+          } 
+        />
 
         {/* Rotas antigas redirecionam para Gestão com a aba correspondente */}
         <Route path="/requirements" element={<PermissionGuard requiredPermission="can_manage_cases"><Navigate to="/management?tab=requirements" replace /></PermissionGuard>} />

@@ -77,8 +77,8 @@ export const TestCases = () => {
       
       setCases(data);
 
-      // Carregar planos para mapear plan_id -> project_id
-      const plans = await getTestPlans(user.id);
+      // Carregar planos para mapear plan_id -> project_id (filtrar por projeto quando aplicável)
+      const plans = await getTestPlans(user.id, filterProject === 'all' ? undefined : filterProject);
       const map: Record<string, string> = {};
       plans.forEach((p) => {
         map[p.id] = p.project_id;
@@ -558,7 +558,7 @@ export const TestCases = () => {
                           e.stopPropagation();
                           handleDelete(testCase.id);
                         }}
-                        className="h-8 w-8 p-0 text-destructive hover:text-destructive/80"
+                        className="h-8 w-8 p-0"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
