@@ -4,7 +4,7 @@ import { ReactNode, forwardRef, ButtonHTMLAttributes } from 'react';
 
 interface StandardButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children?: ReactNode;
-  variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
+  variant?: 'default' | 'brand' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
   size?: 'default' | 'sm' | 'lg' | 'icon';
   icon?: LucideIcon;
   disabled?: boolean;
@@ -37,6 +37,11 @@ export const StandardButton = forwardRef<HTMLButtonElement, StandardButtonProps>
   const resolvedSize = iconOnly ? 'icon' : size;
   const showLabel = !iconOnly;
   const computedAriaLabel = ariaLabel || (typeof children === 'string' ? children : undefined);
+  const baseAnim = 'transition-all duration-200 ease-out hover:-translate-y-[1px] active:translate-y-0 active:scale-[0.99]';
+  const brandClasses = variant === 'brand'
+    ? 'bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]'
+    : '';
+  const iconSizing = iconOnly ? 'h-8 w-8 p-0' : '';
 
   return (
     <Button
@@ -47,7 +52,7 @@ export const StandardButton = forwardRef<HTMLButtonElement, StandardButtonProps>
       disabled={disabled || loading}
       type={type}
       aria-label={computedAriaLabel}
-      className={`${compact ? 'min-h-[32px]' : 'min-h-[40px]'} font-medium transition-all duration-200 ${className}`}
+      className={`font-medium ${baseAnim} ${brandClasses} ${iconSizing} ${className}`}
       {...rest}
     >
       {loading ? (

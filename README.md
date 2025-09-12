@@ -8,13 +8,11 @@
 
 ### Funcionalidades Principais
 
-- **Gestão Completa de Testes**: Planos, Casos e Execuções
-- **IA Generativa**: Geração automática via múltiplos provedores
-- **Relatórios Avançados**: Dashboard com métricas em tempo real
-- **Multi-tenant**: Organizações com permissões granulares
-- **Sistema TODO**: Gestão avançada de tarefas com vínculos
-- **Segurança**: RLS do Supabase + Edge Functions
-- **UI Moderna**: shadcn/ui + Radix UI + Tailwind CSS
+ - **Gestão Completa de Testes**: Planos, Casos e Execuções
+ - **IA Generativa**: Geração automática via múltiplos provedores
+ - **Relatórios Avançados**: Dashboard com métricas em tempo real
+ - **Segurança**: RLS do Supabase + Edge Functions
+ - **UI Moderna**: shadcn/ui + Radix UI + Tailwind CSS
 
 ## 🚀 Instalação e Configuração
 

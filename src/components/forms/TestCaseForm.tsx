@@ -82,8 +82,39 @@ export const TestCaseForm = ({ onSuccess, onCancel, planId, initialData }: TestC
         formData?: typeof formData;
         steps?: TestStep[];
       };
-      if (draft.formData) setFormData(prev => ({ ...prev, ...draft.formData }));
-      if (Array.isArray(draft.steps) && draft.steps.length > 0) {
+      // Verifica se o rascunho possui conteúdo significativo
+      const hasMeaningfulFormData = !!draft.formData && (
+        (draft.formData.title?.trim()?.length ?? 0) > 0 ||
+        (draft.formData.description?.trim()?.length ?? 0) > 0 ||
+        (draft.formData.preconditions?.trim()?.length ?? 0) > 0 ||
+        (draft.formData.expected_result?.trim()?.length ?? 0) > 0 ||
+        (!!draft.formData.plan_id && String(draft.formData.plan_id).trim().length > 0)
+      );
+      const hasMeaningfulSteps = Array.isArray(draft.steps) && draft.steps.some(s =>
+        (s?.action?.trim()?.length ?? 0) > 0 || (s?.expected_result?.trim()?.length ?? 0) > 0
+      );
+
+      if (!hasMeaningfulFormData && !hasMeaningfulSteps) {
+        // Rascunho vazio: remove para não sujar futuras aberturas
+        try { localStorage.removeItem(getDraftKey()); } catch {}
+        return;
+      }
+
+      if (draft.formData) {
+        // Mescla campo a campo, preservando o prefill quando o rascunho estiver vazio
+        setFormData(prev => ({
+          ...prev,
+          title: draft.formData!.title?.trim() ? draft.formData!.title : prev.title,
+          description: draft.formData!.description?.trim() ? draft.formData!.description : prev.description,
+          preconditions: draft.formData!.preconditions?.trim() ? draft.formData!.preconditions : prev.preconditions,
+          expected_result: draft.formData!.expected_result?.trim() ? draft.formData!.expected_result : prev.expected_result,
+          priority: (draft.formData as any).priority || prev.priority,
+          type: (draft.formData as any).type || prev.type,
+          plan_id: draft.formData!.plan_id || prev.plan_id,
+        }));
+      }
+
+      if (hasMeaningfulSteps && Array.isArray(draft.steps)) {
         setSteps(draft.steps.map((s, idx) => ({
           id: s.id || String(idx + 1),
           action: s.action || '',

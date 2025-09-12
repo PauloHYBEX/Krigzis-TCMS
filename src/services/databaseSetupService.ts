@@ -1,32 +1,25 @@
 import { supabase } from '@/integrations/supabase/client';
-import { OrganizationService } from './organizationService';
 
 export interface DatabaseSetupRequest {
   supabaseUrl: string;
   supabaseKey: string;
-  organizationName: string;
   aiApiKey?: string;
-  organization_id?: string;
 }
 
 export interface DatabaseSetupResult {
   success: boolean;
   message?: string;
   error?: string;
-  organization_id?: string;
 }
 
 export interface UserDatabaseConfig {
   supabaseUrl: string;
   supabaseKey: string;
-  databaseId: string;
-  organizationName: string;
   isConfigured: boolean;
 }
 
 export interface DatabaseStatus {
   tablesExist: boolean;
-  userHasOrganization: boolean;
   needsSetup: boolean;
   errorMessage?: string;
 }
@@ -39,6 +32,7 @@ export class DatabaseSetupService {
 
   // Método principal para verificar status da base de dados
   static async getDatabaseStatus(userId: string): Promise<DatabaseStatus> {
+
     // Verificar cache
     const now = Date.now();
     if (this.databaseStatusCache && (now - this.cacheTimestamp) < this.CACHE_DURATION) {
@@ -55,7 +49,6 @@ export class DatabaseSetupService {
       if (!tablesExist) {
         const status: DatabaseStatus = {
           tablesExist: false,
-          userHasOrganization: false,
           needsSetup: true,
           errorMessage: 'As tabelas da base de dados não existem. Execute o SQL de configuração primeiro.'
         };
@@ -63,14 +56,10 @@ export class DatabaseSetupService {
         return status;
       }
 
-      // 2. Se as tabelas existem, verificar se o usuário tem organização
-      const userHasOrganization = await this.checkUserHasOrganizationSafely(userId);
-      console.log(`👤 Usuário tem organização: ${userHasOrganization}`);
-
       const status: DatabaseStatus = {
         tablesExist: true,
-        userHasOrganization,
-        needsSetup: !userHasOrganization
+        // Sem organizações: se tabelas existem, não há setup adicional necessário
+        needsSetup: false
       };
 
       this.cacheStatus(status);
@@ -80,10 +69,10 @@ export class DatabaseSetupService {
       console.error('❌ Erro ao verificar status da base:', error);
       const status: DatabaseStatus = {
         tablesExist: false,
-        userHasOrganization: false,
         needsSetup: true,
         errorMessage: 'Erro ao conectar com a base de dados: ' + (error as Error).message
       };
+
       this.cacheStatus(status);
       return status;
     }
@@ -94,11 +83,11 @@ export class DatabaseSetupService {
     try {
       console.log('🔍 Verificando se tabelas existem...');
       
-      // Tentar queries simples em tabelas essenciais
+      // Tentar queries simples em tabelas essenciais (sem organizações/To-Do)
       const checks = await Promise.allSettled([
         supabase.from('profiles').select('id', { count: 'exact', head: true }),
-        supabase.from('organizations').select('id', { count: 'exact', head: true }),
-        supabase.from('organization_members').select('id', { count: 'exact', head: true })
+        supabase.from('user_permissions').select('id', { count: 'exact', head: true }),
+        supabase.from('test_plans').select('id', { count: 'exact', head: true })
       ]);
 
       // Verificar se pelo menos uma tabela existe e é acessível
@@ -120,23 +109,7 @@ export class DatabaseSetupService {
     }
   }
 
-  // Verificação segura se o usuário tem organização
-  private static async checkUserHasOrganizationSafely(userId: string): Promise<boolean> {
-    try {
-      const { data, error } = await supabase
-        .from('organization_members')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('status', 'active')
-        .limit(1);
-
-      // Se a query funciona e retorna dados, o usuário tem organização
-      return !error && data && data.length > 0;
-    } catch (error) {
-      console.log('👤 Erro ao verificar organização do usuário:', error);
-      return false;
-    }
-  }
+  // Removido checagem de organizações (escopo single-tenant/global)
 
   // Cache do status
   private static cacheStatus(status: DatabaseStatus): void {
@@ -180,7 +153,7 @@ export class DatabaseSetupService {
   }
 
   // Configurar base de dados para o usuário
-  static async setupUserDatabase(userId: string, data: DatabaseSetupRequest): Promise<DatabaseSetupResult> {
+  static async setupUserDatabase(_userId: string, data: DatabaseSetupRequest): Promise<DatabaseSetupResult> {
     try {
       console.log('⚙️ Iniciando configuração da base de dados...');
       
@@ -197,54 +170,10 @@ export class DatabaseSetupService {
         };
       }
 
-      // Verificar se já existe uma organização para este usuário
-      const status = await this.getDatabaseStatus(userId);
-      if (status.userHasOrganization) {
-        return {
-          success: false,
-          error: 'Usuário já possui uma base de dados configurada'
-        };
-      }
-
-      // Criar nova organização
-      const organization = await OrganizationService.createDefaultOrganizationForUser(
-        userId,
-        data.organizationName
-      );
-
-      if (!organization) {
-        return {
-          success: false,
-          error: 'Erro ao criar organização'
-        };
-      }
-
-      // Atualizar organização com dados do Supabase (via settings)
-      const updatedOrg = await OrganizationService.updateOrganization(organization.id, {
-        settings: {
-          supabase_url: data.supabaseUrl,
-          supabase_key: data.supabaseKey,
-          ai_api_key: data.aiApiKey || null
-        },
-        updated_at: new Date().toISOString()
-      });
-
-      if (!updatedOrg) {
-        return {
-          success: false,
-          error: 'Erro ao configurar dados da organização'
-        };
-      }
-
-      // Limpar cache após configuração bem-sucedida
+      // Sem organizações: configuração é apenas validação das tabelas
       this.clearCache();
-
-      console.log('✅ Base de dados configurada com sucesso!');
-      return {
-        success: true,
-        message: 'Base de dados configurada com sucesso!',
-        organization_id: organization.id
-      };
+      console.log('✅ Estrutura de base validada com sucesso!');
+      return { success: true, message: 'Estrutura de base validada com sucesso!' };
 
     } catch (error) {
       console.error('❌ Erro ao configurar base de dados:', error);
@@ -256,28 +185,13 @@ export class DatabaseSetupService {
   }
 
   // Obter configuração da base de dados do usuário
-  static async getUserDatabaseConfig(userId: string): Promise<UserDatabaseConfig | null> {
+  static async getUserDatabaseConfig(_userId: string): Promise<UserDatabaseConfig | null> {
     try {
-      const status = await this.getDatabaseStatus(userId);
-      
-      if (!status.tablesExist || !status.userHasOrganization) {
-        return null;
-      }
-
-      const userOrg = await OrganizationService.getCurrentUserOrganization();
-      if (!userOrg) {
-        return null;
-      }
-
-      const settings = userOrg.organization.settings as Record<string, unknown> || {};
-
-      return {
-        supabaseUrl: (settings.supabase_url as string) || '',
-        supabaseKey: (settings.supabase_key as string) || '',
-        databaseId: userOrg.organization.database_id,
-        organizationName: userOrg.organization.name,
-        isConfigured: true
-      };
+      const status = await this.getDatabaseStatus('temp');
+      if (!status.tablesExist) return null;
+      // Retorna apenas URL atual conhecida; chave não é acessível no cliente
+      const url = import.meta.env.VITE_SUPABASE_URL || '';
+      return { supabaseUrl: url, supabaseKey: '', isConfigured: true };
 
     } catch (error) {
       console.error('Error getting user database config:', error);
@@ -286,25 +200,11 @@ export class DatabaseSetupService {
   }
 
   // Remover configuração da base de dados
-  static async removeDatabaseConfig(userId: string): Promise<boolean> {
+  static async removeDatabaseConfig(_userId: string): Promise<boolean> {
     try {
-      const userOrg = await OrganizationService.getCurrentUserOrganization();
-      
-      if (!userOrg) {
-        return false;
-      }
-
-      // Remover usuário da organização
-      const removed = await OrganizationService.removeUserFromOrganization(
-        userOrg.organization.id,
-        userId
-      );
-
-      if (removed) {
-        this.clearCache();
-      }
-
-      return removed;
+      // Sem organizações: nada a remover
+      this.clearCache();
+      return true;
 
     } catch (error) {
       console.error('Error removing database config:', error);
@@ -336,8 +236,8 @@ export class DatabaseSetupService {
       const { createClient } = await import('@supabase/supabase-js');
       const testClient = createClient(supabaseUrl, supabaseKey);
 
-      // Verificar se tabelas principais existem
-      const requiredTables = ['profiles', 'organizations', 'organization_members', 'user_permissions'];
+      // Verificar se tabelas principais existem (sem organizações/To-Do)
+      const requiredTables = ['profiles', 'user_permissions', 'test_plans', 'test_cases', 'test_executions'];
       
       for (const table of requiredTables) {
         const { error } = await testClient.from(table).select('*').limit(1);
@@ -358,39 +258,28 @@ export class DatabaseSetupService {
   // Obter estatísticas da base de dados
   static async getDatabaseStatistics(): Promise<{
     totalUsers: number;
-    totalOrganizations: number;
     totalTests: number;
   }> {
     try {
       const status = await this.getDatabaseStatus('temp');
       
       if (!status.tablesExist) {
-        return {
-          totalUsers: 0,
-          totalOrganizations: 0,
-          totalTests: 0
-        };
+        return { totalUsers: 0, totalTests: 0 };
       }
 
-      const [usersCount, orgsCount, testsCount] = await Promise.all([
+      const [usersCount, testsCount] = await Promise.all([
         supabase.from('profiles').select('id', { count: 'exact', head: true }),
-        supabase.from('organizations').select('id', { count: 'exact', head: true }),
         supabase.from('test_plans').select('id', { count: 'exact', head: true })
       ]);
 
       return {
         totalUsers: usersCount.count || 0,
-        totalOrganizations: orgsCount.count || 0,
         totalTests: testsCount.count || 0
       };
 
     } catch (error) {
       console.error('Error getting database statistics:', error);
-      return {
-        totalUsers: 0,
-        totalOrganizations: 0,
-        totalTests: 0
-      };
+      return { totalUsers: 0, totalTests: 0 };
     }
   }
 } 

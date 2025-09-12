@@ -37,6 +37,7 @@ export const Layout = ({ children }: LayoutProps) => {
       cases: 'Casos de Teste',
       'test-cases': 'Casos de Teste',
       executions: 'Execuções',
+      management: 'Gestão',
       requirements: 'Requisitos',
       traceability: 'Rastreabilidade',
       defects: 'Defeitos',
@@ -65,7 +66,7 @@ export const Layout = ({ children }: LayoutProps) => {
           <main className="flex-1 overflow-auto px-3 sm:px-5 lg:px-6 xl:px-8 py-4 sm:py-6">
             {/* Breadcrumbs */}
             <div className="mb-4 sm:mb-6 text-sm text-muted-foreground flex items-center gap-2">
-              <span className="text-foreground font-medium">Krigzis web</span>
+              <span className="text-foreground font-medium">Krigzis TCMS</span>
               <span className="opacity-70">/</span>
               <span className="neon-text font-semibold">{currentTitle}</span>
             </div>

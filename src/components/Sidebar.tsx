@@ -14,9 +14,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ListChecks,
-  Link as LinkIcon,
-  Bug,
-  
 } from 'lucide-react';
 import KrigzisLogo from '@/components/branding/KrigzisLogo';
 import { cn } from '@/lib/utils';
@@ -27,9 +24,7 @@ const navigation = [
   { name: 'Planos de Teste', href: '/plans', icon: FileText, requiredPermission: 'can_manage_plans' },
   { name: 'Casos de Teste', href: '/cases', icon: TestTube, requiredPermission: 'can_manage_cases' },
   { name: 'Execuções', href: '/executions', icon: PlayCircle, requiredPermission: 'can_manage_executions' },
-  { name: 'Requisitos', href: '/requirements', icon: ListChecks, requiredPermission: 'can_manage_cases' },
-  { name: 'Rastreabilidade', href: '/traceability', icon: LinkIcon, requiredPermission: 'can_manage_cases' },
-  { name: 'Defeitos', href: '/defects', icon: Bug, requiredPermission: 'can_manage_executions' },
+  { name: 'Gestão', href: '/management', icon: ListChecks, requiredPermission: null },
   { name: 'Gerador IA', href: '/ai-generator', icon: Sparkles, requiredPermission: 'can_use_ai' },
   { name: 'Relatórios', href: '/reports', icon: BarChart3, requiredPermission: 'can_view_reports' },
   { name: 'Histórico', href: '/history', icon: HistoryIcon, requiredPermission: null },
@@ -116,7 +111,7 @@ export const Sidebar = () => {
             {isExpanded ? (
               <div className="flex items-center gap-2">
                 <KrigzisLogo size={24} className="h-6 w-6" />
-                <h1 className="text-xl font-bold text-sidebar-foreground">Krigzis web</h1>
+                <h1 className="text-xl font-bold text-sidebar-foreground">Krigzis TCMS</h1>
               </div>
             ) : (
               <KrigzisLogo size={24} className="h-6 w-6" />

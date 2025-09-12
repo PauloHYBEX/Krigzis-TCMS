@@ -35,7 +35,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { email, role, organization_id } = await req.json().catch(() => ({ email: undefined }));
+    const { email, role } = await req.json().catch(() => ({ email: undefined }));
     const debug = (req.headers.get("x-debug") ?? req.headers.get("X-Debug")) === "1";
 
     if (!email || typeof email !== "string") {
@@ -65,7 +65,7 @@ Deno.serve(async (req: Request) => {
 
     const callerId = caller.user.id;
 
-    // Check if caller is master (global or org-specific if org provided)
+    // Check if caller is master (global)
     const { data: profile, error: profileErr } = await supabase
       .from("profiles")
       .select("id, role")
@@ -76,7 +76,7 @@ Deno.serve(async (req: Request) => {
       return json(req, { error: "Falha ao verificar perfil do usuário" }, 500);
     }
 
-    // Only global masters can invite for now (simpler and aligns with policy)
+    // Only global masters can invite
     if (profile?.role !== "master") {
       return json(req, { error: "Apenas usuários Master podem convidar" }, 403);
     }
@@ -94,7 +94,7 @@ Deno.serve(async (req: Request) => {
     const { data: inviteRes, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(email, {
       redirectTo,
       // Force initial role to viewer for security. UI selection is ignored intentionally.
-      data: { initial_role: "viewer", invited_by: callerId, requested_role: role ?? "viewer", organization_id: organization_id ?? null },
+      data: { initial_role: "viewer", invited_by: callerId, requested_role: role ?? "viewer" },
     });
 
     if (inviteErr) {
@@ -118,7 +118,7 @@ Deno.serve(async (req: Request) => {
       };
 
       if (alreadyExists) {
-        // Se o usuário já existe, tente obter seu user_id para garantir associação à organização
+        // Se o usuário já existe, tente obter seu user_id para criar/atualizar perfil mínimo
         let existingUserId: string | null = null;
         try {
           const { data: fetchData } = await admin.auth.admin.generateLink({ type: 'recovery', email } as any);
@@ -127,21 +127,12 @@ Deno.serve(async (req: Request) => {
           // ignore; ainda tentaremos enviar o email abaixo
         }
         if (existingUserId) {
-          // Upsert perfil mínimo (sem organization_id) e associação à organização (papel viewer por segurança)
+          // Upsert perfil mínimo (sem escopo de organização)
           await admin.from('profiles').upsert({
             id: existingUserId,
             role: 'viewer',
             updated_at: new Date().toISOString(),
           } as any);
-          if (organization_id) {
-            await admin.from('organization_members').upsert({
-              organization_id,
-              user_id: existingUserId,
-              role: 'viewer',
-              status: 'invited',
-              accepted_at: null,
-            } as any, { onConflict: 'organization_id,user_id' } as any);
-          }
         }
         // Client público (sem Authorization) para disparar e-mail via GoTrue
         const pub = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -241,17 +232,6 @@ Deno.serve(async (req: Request) => {
         role: "viewer",
         updated_at: new Date().toISOString(),
       } as any);
-
-      // Optionally add to organization_members if provided
-      if (organization_id) {
-        await admin.from("organization_members").upsert({
-          organization_id,
-          user_id: invitedUser.id,
-          role: "viewer",
-          status: "invited",
-          accepted_at: null,
-        } as any, { onConflict: "organization_id,user_id" } as any);
-      }
     }
 
     return json(req, {

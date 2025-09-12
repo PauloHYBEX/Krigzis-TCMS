@@ -25,6 +25,7 @@ import ResetPassword from '@/pages/ResetPassword';
 import { Requirements } from '@/pages/Requirements';
 import { Defects } from '@/pages/Defects';
 import { TraceabilityMatrix } from '@/pages/TraceabilityMatrix';
+import { Gestao } from '@/pages/Gestao';
 import './App.css';
 import { Profiles } from '@/pages/Profiles';
 
@@ -57,9 +58,20 @@ function AppRouter() {
         <Route path="/plans" element={<PermissionGuard requiredPermission="can_manage_plans"><TestPlans /></PermissionGuard>} />
         <Route path="/cases" element={<PermissionGuard requiredPermission="can_manage_cases"><TestCases /></PermissionGuard>} />
         <Route path="/executions" element={<PermissionGuard requiredPermission="can_manage_executions"><TestExecutions /></PermissionGuard>} />
-        <Route path="/requirements" element={<PermissionGuard requiredPermission="can_manage_cases"><Requirements /></PermissionGuard>} />
-        <Route path="/defects" element={<PermissionGuard requiredPermission="can_manage_executions"><Defects /></PermissionGuard>} />
-        <Route path="/traceability" element={<PermissionGuard requiredPermission="can_manage_cases"><TraceabilityMatrix /></PermissionGuard>} />
+        {/* Nova página Gestão com abas */}
+        <Route 
+          path="/management" 
+          element={
+            <PermissionGuard anyOfPermissions={["can_manage_cases", "can_manage_executions"]} redirect="/">
+              <Gestao />
+            </PermissionGuard>
+          } 
+        />
+
+        {/* Rotas antigas redirecionam para Gestão com a aba correspondente */}
+        <Route path="/requirements" element={<PermissionGuard requiredPermission="can_manage_cases"><Navigate to="/management?tab=requirements" replace /></PermissionGuard>} />
+        <Route path="/traceability" element={<PermissionGuard requiredPermission="can_manage_cases"><Navigate to="/management?tab=traceability" replace /></PermissionGuard>} />
+        <Route path="/defects" element={<PermissionGuard requiredPermission="can_manage_executions"><Navigate to="/management?tab=defects" replace /></PermissionGuard>} />
         <Route path="/ai-generator" element={<PermissionGuard requiredPermission="can_use_ai"><AIGenerator /></PermissionGuard>} />
         <Route path="/history" element={<PermissionGuard><History /></PermissionGuard>} />
         <Route path="/reports" element={<PermissionGuard requiredPermission="can_view_reports"><Reports /></PermissionGuard>} />

@@ -395,7 +395,7 @@ export const TestPlans = () => {
 
       const tableData = filteredAndSortedPlans.map(plan => ({
         ID: `PT-${String(plan.sequence ?? '001').padStart(3, '0')}`,
-        Nome: plan.title,
+        Título: plan.title,
         Projeto: getProjectLabel(plan.project_id),
         Status: getStatusLabel(plan.status),
         Criação: plan.created_at.toLocaleDateString('pt-BR')
@@ -404,8 +404,8 @@ export const TestPlans = () => {
       if (format === 'pdf') {
         // Criar PDF simples sem dependências externas
         const content = `Planos de Teste\nExportado em: ${new Date().toLocaleDateString('pt-BR')}\n\n` +
-          `ID\tNome\tProjeto\tStatus\tCriação\n` +
-          tableData.map(row => `${row.ID}\t${row.Nome}\t${row.Projeto}\t${row.Status}\t${row.Criação}`).join('\n');
+          `ID\tTítulo\tProjeto\tStatus\tCriação\n` +
+          tableData.map(row => `${row.ID}\t${row["Título"]}\t${row.Projeto}\t${row.Status}\t${row.Criação}`).join('\n');
         
         const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
@@ -450,7 +450,7 @@ export const TestPlans = () => {
       };
 
       const tableData = {
-        headers: ['ID', 'Nome', 'Projeto', 'Status', 'Criação'],
+        headers: ['ID', 'Título', 'Projeto', 'Status', 'Criação'],
         rows: filteredAndSortedPlans.map(plan => [
           `PT-${String(plan.sequence ?? '001').padStart(3, '0')}`,
           plan.title,
@@ -488,7 +488,7 @@ export const TestPlans = () => {
     <div className="flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
+        <div className="pl-24">
           <h1 className="text-2xl font-bold text-foreground">Planos de Teste</h1>
           <p className="text-sm text-muted-foreground">Gerencie seus planos de teste</p>
         </div>
@@ -567,10 +567,10 @@ export const TestPlans = () => {
                 Mais antigo
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => { setSortBy('title'); setSortOrder('asc'); }}>
-                Nome (A-Z)
+                Título (A-Z)
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => { setSortBy('title'); setSortOrder('desc'); }}>
-                Nome (Z-A)
+                Título (Z-A)
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -687,13 +687,13 @@ export const TestPlans = () => {
               {filteredAndSortedPlans.length > 0 ? (
                 <div className="bg-card border border-border rounded-lg overflow-hidden">
                   {/* Header da tabela */}
-                  <div className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  <div className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] items-start gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
                     <div>ID</div>
-                    <div>Nome</div>
-                    <div>Projeto</div>
-                    <div>Status</div>
-                    <div>Criado em</div>
-                    <div>Ações</div>
+                    <div className="text-center pt-px">Título</div>
+                    <div className="text-center">Projeto</div>
+                    <div className="text-center">Status</div>
+                    <div className="text-center">Criado em</div>
+                    <div className="flex justify-end">Ações</div>
                   </div>
                   
                   {/* Linhas da tabela */}
@@ -701,7 +701,7 @@ export const TestPlans = () => {
                     {paginatedPlans.map((plan) => (
                       <div 
                         key={plan.id} 
-                        className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                        className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] items-start gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
                         onClick={() => handleViewDetails(plan)}
                       >
                         <div className="flex items-center">
@@ -710,38 +710,34 @@ export const TestPlans = () => {
                           </span>
                         </div>
                         
-                        <div className="flex items-center min-w-0">
+                        <div className="flex items-start min-w-0 gap-2 self-start justify-center text-center">
                           <div className="min-w-0">
-                            <div className="font-medium text-foreground truncate">
-                              {plan.title}
-                            </div>
-                            <div className="text-xs text-muted-foreground truncate">
-                              {plan.description}
-                            </div>
+                            <div className="text-sm font-medium leading-tight text-foreground truncate">{plan.title}</div>
+                            <div className="text-xs text-muted-foreground truncate">{plan.description}</div>
                           </div>
                           {plan.generated_by_ai && (
-                            <Badge variant="secondary" className="ml-2 flex-shrink-0">
+                            <Badge variant="secondary" className="flex-shrink-0 mt-[1px]">
                               <Sparkles className="h-3 w-3 mr-1" />
                               IA
                             </Badge>
                           )}
                         </div>
                         
-                        <div className="flex items-center">
+                        <div className="flex items-center justify-center">
                           <ProjectDisplayField projectId={plan.project_id} />
                         </div>
                         
-                        <div className="flex items-center">
+                        <div className="flex items-center justify-center">
                           <Badge variant="outline" className={statusClasses(plan.status)}>
                             {getLabelFor(plan.status)}
                           </Badge>
                         </div>
                         
-                        <div className="flex items-center text-sm text-muted-foreground">
+                        <div className="flex items-center text-sm text-muted-foreground justify-center">
                           {plan.created_at.toLocaleDateString('pt-BR')}
                         </div>
                         
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 justify-end">
                           <Button
                             variant="ghost"
                             size="sm"

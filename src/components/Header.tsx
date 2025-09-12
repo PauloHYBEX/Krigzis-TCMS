@@ -105,7 +105,7 @@ export const Header = () => {
             <div className="flex items-center gap-2">
               <KrigzisLogo size={24} className="h-6 w-6" />
               <h1 className="text-2xl font-bold text-foreground hidden md:block">
-                Krigzis web
+                Krigzis TCMS
               </h1>
             </div>
             <p className="text-sm text-muted-foreground hidden lg:block">

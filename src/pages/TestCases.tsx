@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Plus, Edit, Trash2, Search, ArrowUpDown, Filter, FileText, List, Grid, Calendar } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import { getTestCases, getTestCasesByProject, deleteTestCase, getTestPlans } from '@/services/supabaseService';
+import { getTestCases, getTestCasesByProject, deleteTestCase, getTestPlans, getCaseLinkedCounts } from '@/services/supabaseService';
 import { TestCase } from '@/types';
 import { TestCaseForm } from '@/components/forms/TestCaseForm';
 import { DetailModal } from '@/components/DetailModal';
@@ -59,6 +59,7 @@ export const TestCases = () => {
   const [planProjectMap, setPlanProjectMap] = useState<Record<string, string>>({});
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deletingCaseId, setDeletingCaseId] = useState<string | null>(null);
+  const [caseLinkedCounts, setCaseLinkedCounts] = useState<{ executionCount: number; defectCount: number } | null>(null);
 
   // Carregar casos com base no filtro de projeto
   const loadCases = async () => {
@@ -76,8 +77,8 @@ export const TestCases = () => {
       
       setCases(data);
 
-      // Carregar planos para mapear plan_id -> project_id
-      const plans = await getTestPlans(user.id);
+      // Carregar planos para mapear plan_id -> project_id (filtrar por projeto quando aplicável)
+      const plans = await getTestPlans(user.id, filterProject === 'all' ? undefined : filterProject);
       const map: Record<string, string> = {};
       plans.forEach((p) => {
         map[p.id] = p.project_id;
@@ -226,11 +227,31 @@ export const TestCases = () => {
   const handleDelete = async (id: string) => {
     setDeletingCaseId(id);
     setConfirmDeleteOpen(true);
+    setCaseLinkedCounts(null);
+    try {
+      if (user) {
+        const counts = await getCaseLinkedCounts(user.id, id);
+        setCaseLinkedCounts(counts);
+      }
+    } catch (error) {
+      console.error('Erro ao verificar vínculos do caso:', error);
+      setCaseLinkedCounts({ executionCount: 0, defectCount: 0 });
+    }
   };
 
   const performDeleteCase = async () => {
     if (!deletingCaseId) return;
     try {
+      if (caseLinkedCounts && (caseLinkedCounts.executionCount > 0 || caseLinkedCounts.defectCount > 0)) {
+        toast({
+          title: 'Exclusão bloqueada',
+          description: 'Este caso possui execuções e/ou defeitos vinculados. Remova as dependências antes de excluir.',
+          variant: 'destructive'
+        });
+        setConfirmDeleteOpen(false);
+        setDeletingCaseId(null);
+        return;
+      }
       await deleteTestCase(deletingCaseId);
       setCases(prev => prev.filter(c => c.id !== deletingCaseId));
       toast({ title: 'Sucesso', description: 'Caso de teste excluído com sucesso!' });
@@ -253,6 +274,7 @@ export const TestCases = () => {
     } finally {
       setConfirmDeleteOpen(false);
       setDeletingCaseId(null);
+      setCaseLinkedCounts(null);
     }
   };
 
@@ -279,7 +301,7 @@ export const TestCases = () => {
     <div className="flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
+        <div className="pl-24">
           <h1 className="text-2xl font-bold text-foreground">Casos de Teste</h1>
           <p className="text-sm text-muted-foreground">Gerencie seus casos de teste</p>
         </div>
@@ -472,13 +494,13 @@ export const TestCases = () => {
           {filteredCases.length > 0 ? (
             <div className="bg-card border border-border rounded-lg overflow-hidden">
               {/* Header da tabela */}
-              <div className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              <div className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] items-start gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 <div>ID</div>
-                <div>Título</div>
-                <div>Projeto</div>
-                <div>Prioridade</div>
-                <div>Criado em</div>
-                <div>Ações</div>
+                <div className="text-center pt-px">Título</div>
+                <div className="text-center">Projeto</div>
+                <div className="text-center">Prioridade</div>
+                <div className="text-center">Criado em</div>
+                <div className="flex justify-end">Ações</div>
               </div>
               
               {/* Linhas da tabela */}
@@ -486,7 +508,7 @@ export const TestCases = () => {
                 {paginatedCases.map((testCase) => (
                   <div 
                     key={testCase.id} 
-                    className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                    className="grid grid-cols-[80px_1fr_120px_120px_120px_100px] items-start gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
                     onClick={() => handleViewDetails(testCase)}
                   >
                     <div className="flex items-center">
@@ -495,32 +517,28 @@ export const TestCases = () => {
                       </span>
                     </div>
                     
-                    <div className="flex items-center min-w-0">
+                    <div className="flex items-start min-w-0 self-start justify-center text-center">
                       <div className="min-w-0">
-                        <div className="font-medium text-foreground truncate">
-                          {testCase.title}
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate">
-                          {testCase.description || 'Sem descrição'}
-                        </div>
+                        <div className="text-sm font-medium leading-tight text-foreground truncate">{testCase.title}</div>
+                        <div className="text-xs text-muted-foreground truncate">{testCase.description || 'Sem descrição'}</div>
                       </div>
                     </div>
                     
-                    <div className="flex items-center">
+                    <div className="flex items-center justify-center">
                       <ProjectDisplayField projectId={planProjectMap[testCase.plan_id] || ''} />
                     </div>
                     
-                    <div className="flex items-center">
+                    <div className="flex items-center justify-center">
                       <Badge variant="outline" className={priorityBadgeClass(testCase.priority)}>
                         {priorityLabel(testCase.priority)}
                       </Badge>
                     </div>
                     
-                    <div className="flex items-center text-xs text-muted-foreground">
+                    <div className="flex items-center justify-center text-xs text-muted-foreground">
                       {testCase.created_at ? new Date(testCase.created_at).toLocaleDateString('pt-BR') : 'N/A'}
                     </div>
                     
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 justify-end">
                       <Button
                         variant="ghost"
                         size="sm"
@@ -540,7 +558,7 @@ export const TestCases = () => {
                           e.stopPropagation();
                           handleDelete(testCase.id);
                         }}
-                        className="h-8 w-8 p-0 text-destructive hover:text-destructive/80"
+                        className="h-8 w-8 p-0"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -647,19 +665,34 @@ export const TestCases = () => {
       />
 
       {/* Confirm Delete Modal */}
-      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+      <AlertDialog open={confirmDeleteOpen} onOpenChange={(open) => {
+        setConfirmDeleteOpen(open);
+        if (!open) {
+          setDeletingCaseId(null);
+          setCaseLinkedCounts(null);
+        }
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir caso de teste?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. O caso de teste será removido permanentemente.
+              {caseLinkedCounts == null && 'Verificando dependências...'}
+              {caseLinkedCounts && (caseLinkedCounts.executionCount > 0 || caseLinkedCounts.defectCount > 0)
+                ? (
+                  <span>
+                    Este caso possui {caseLinkedCounts.executionCount} execução(ões) e {caseLinkedCounts.defectCount} defeito(s) vinculados.
+                    Remova essas dependências antes de excluir o caso para manter a integridade dos dados.
+                  </span>
+                ) : (caseLinkedCounts && 'Esta ação não pode ser desfeita. O caso será removido permanentemente.')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setDeletingCaseId(null)}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={performDeleteCase} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Excluir
-            </AlertDialogAction>
+            {caseLinkedCounts && caseLinkedCounts.executionCount === 0 && caseLinkedCounts.defectCount === 0 && (
+              <AlertDialogAction onClick={performDeleteCase} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                Excluir
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

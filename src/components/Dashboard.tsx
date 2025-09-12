@@ -14,7 +14,17 @@ import {
   Eye
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import { getTestPlans, getTestCases, getTestExecutions, getDefects, getRequirements } from '@/services/supabaseService';
+import { 
+  getTestPlans, 
+  getTestCases, 
+  getTestExecutions, 
+  getDefects, 
+  getRequirements,
+  getTestCasesByProject,
+  getTestExecutionsByProject,
+  getDefectsByProject,
+  getRequirementsByProject
+} from '@/services/supabaseService';
 import { TestPlan, TestCase, TestExecution, Defect, Requirement } from '@/types';
 import { useDashboardSettings } from '@/hooks/useDashboardSettings';
 import { TestPlanForm } from '@/components/forms/TestPlanForm';
@@ -66,35 +76,31 @@ export const Dashboard = () => {
 
   const loadDashboardData = async () => {
     try {
-      // Sempre buscar por usuário e aplicar filtro por projeto no cliente
-      const [allPlans, allCases, allExecutions, allDefects, allRequirements] = await Promise.all([
-        getTestPlans(user!.id),
-        getTestCases(user!.id),
-        getTestExecutions(user!.id),
-        getDefects(user!.id),
-        getRequirements(user!.id)
-      ]);
+      // Buscar já filtrado por projeto quando houver currentProject
+      let plans: TestPlan[] = [];
+      let cases: TestCase[] = [];
+      let executions: TestExecution[] = [];
+      let defects: Defect[] = [];
+      let requirements: Requirement[] = [];
 
-      let plans = allPlans;
-      let cases = allCases;
-      let executions = allExecutions;
-      let defects = allDefects;
-      let requirements = allRequirements;
-
-      if (currentProject) {
-        // Filtrar por projeto atual, usando relações quando necessário
-        plans = allPlans.filter(p => p.project_id === currentProject.id);
-        const planIds = new Set(plans.map(p => p.id));
-
-        cases = allCases.filter(c => (c as any).project_id === currentProject.id || (c as any).plan_id && planIds.has((c as any).plan_id));
-        const caseIds = new Set(cases.map((c: any) => c.id));
-
-        executions = allExecutions.filter(e => (e as any).project_id === currentProject.id || (e as any).plan_id && planIds.has((e as any).plan_id) || (e as any).case_id && caseIds.has((e as any).case_id));
-        const executionIds = new Set(executions.map((e: any) => e.id));
-
-        defects = allDefects.filter(d => (d as any).project_id === currentProject.id || (d as any).execution_id && executionIds.has((d as any).execution_id) || (d as any).case_id && caseIds.has((d as any).case_id));
-
-        requirements = allRequirements.filter(r => (r as any).project_id === currentProject.id);
+      if (currentProject?.id) {
+        const [p, c, e, d, r] = await Promise.all([
+          getTestPlans(user!.id, currentProject.id),
+          getTestCasesByProject(user!.id, currentProject.id),
+          getTestExecutionsByProject(user!.id, currentProject.id),
+          getDefectsByProject(user!.id, currentProject.id),
+          getRequirementsByProject(user!.id, currentProject.id),
+        ]);
+        plans = p; cases = c; executions = e; defects = d; requirements = r;
+      } else {
+        const [p, c, e, d, r] = await Promise.all([
+          getTestPlans(user!.id),
+          getTestCases(user!.id),
+          getTestExecutions(user!.id),
+          getDefects(user!.id),
+          getRequirements(user!.id),
+        ]);
+        plans = p; cases = c; executions = e; defects = d; requirements = r;
       }
 
       const passedExecutions = executions.filter(e => e.status === 'passed').length;

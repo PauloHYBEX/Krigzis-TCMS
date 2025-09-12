@@ -145,6 +145,18 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
         onSuccess?.(updated);
         try { localStorage.removeItem(storageKey); } catch {}
       } else {
+        // Validação: garantir que o caso pertence ao plano selecionado
+        const chosenCase = cases.find(c => c.id === formData.case_id);
+        if (!formData.plan_id || !formData.case_id || !chosenCase) {
+          toast({ title: 'Dados incompletos', description: 'Selecione um Plano e um Caso de Teste válidos.', variant: 'destructive' });
+          setLoading(false);
+          return;
+        }
+        if (chosenCase.plan_id !== formData.plan_id) {
+          toast({ title: 'Inconsistência nos vínculos', description: 'O Caso selecionado não pertence ao Plano escolhido.', variant: 'destructive' });
+          setLoading(false);
+          return;
+        }
         const created = await createTestExecution({
           ...formData,
           user_id: user.id
@@ -174,6 +186,11 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
     if (field === 'case_id') {
       const caseData = cases.find(c => c.id === value);
       setSelectedCase(caseData || null);
+    }
+    if (field === 'plan_id') {
+      // ao mudar o plano, resetar caso selecionado para evitar vínculos inconsistentes
+      setSelectedCase(null);
+      setFormData(prev => ({ ...prev, case_id: '' }));
     }
   };
 
@@ -301,7 +318,11 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
                 Cancelar
               </Button>
             )}
-            <Button type="submit" disabled={loading || !formData.case_id || !formData.plan_id} className="bg-brand hover:bg-brand/90 text-white">
+            <Button
+              type="submit"
+              disabled={loading || !formData.case_id || !formData.plan_id}
+              className={isEdit ? 'bg-brand hover:bg-brand/90 text-white' : 'bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0'}
+            >
               {loading ? (isEdit ? 'Salvando...' : 'Registrando...') : (isEdit ? 'Salvar Alterações' : 'Registrar Execução')}
             </Button>
           </div>
