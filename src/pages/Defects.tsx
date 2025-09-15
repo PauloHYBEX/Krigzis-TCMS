@@ -205,6 +205,15 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
   const submit = async () => {
     try {
       if (!user) return;
+      // Validação de integridade: se executionId e caseId foram informados,
+      // a execução precisa pertencer ao mesmo caso selecionado
+      if (executionId && caseId) {
+        const caseOfExec = executionCaseMap[executionId] || caseExecutions.find((e) => e.id === executionId)?.case_id;
+        if (caseOfExec && caseOfExec !== caseId) {
+          toast({ title: 'Inconsistência', description: 'A execução selecionada não pertence ao caso escolhido.', variant: 'destructive' });
+          return;
+        }
+      }
       if (editing) {
         const updated = await updateDefect(editing.id, { title, description, severity, status, case_id: caseId || null, execution_id: executionId || null } as any);
         setDefects(prev => prev.map(r => r.id === updated.id ? updated : r));

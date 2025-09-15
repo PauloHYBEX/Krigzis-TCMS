@@ -16,6 +16,8 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "preview": "vite preview"
   },
   "dependencies": {
