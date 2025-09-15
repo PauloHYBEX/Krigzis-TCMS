@@ -31,6 +31,7 @@ import { ViewModeToggle } from '@/components/ViewModeToggle';
 import { useProject } from '@/contexts/ProjectContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNavigate } from 'react-router-dom';
+import { InfoPill } from '@/components/InfoPill';
 
 export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPreferredViewModeChange }: { embedded?: boolean; preferredViewMode?: 'cards'|'list'; onPreferredViewModeChange?: (m: 'cards'|'list') => void; }) => {
   const { user } = useAuth();
@@ -108,7 +109,7 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
           if (d.case_id && caseSet.has(d.case_id) && d.status !== 'closed') {
             openCount += 1;
             if (!maxSeverity || rank[d.severity as 'low'|'medium'|'high'|'critical'] > rank[maxSeverity]) {
-              maxSeverity = d.severity as any;
+              maxSeverity = d.severity as 'low'|'medium'|'high'|'critical';
             }
           }
         }
@@ -263,20 +264,17 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
                       <div className="text-sm text-muted-foreground mb-2 line-clamp-2">{req.description}</div>
                       <div className="mt-auto flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span
-                            className="inline-flex items-center gap-1 h-5 px-1.5 rounded-sm text-[11px] font-medium bg-muted/60 border border-border/40 text-foreground/80 min-w-[52px] justify-center hover:bg-muted/70 transition-colors"
+                          <InfoPill
+                            icon={LinkIcon}
+                            value={linkedCount}
                             title="Casos vinculados ao requisito"
-                          >
-                            <LinkIcon className="h-3 w-3 opacity-70" />
-                            <span className="font-mono">{linkedCount}</span>
-                          </span>
-                          <span
-                            className="inline-flex items-center gap-1 h-5 px-1.5 rounded-sm text-[11px] font-medium bg-muted/60 border border-border/40 text-foreground/80 min-w-[52px] justify-center hover:bg-muted/70 transition-colors"
+                          />
+                          <InfoPill
+                            icon={BugIcon}
+                            value={dInfo.openCount}
                             title={dInfo.openCount > 0 ? `Defeitos abertos • severidade: ${severityLabel(dInfo.maxSeverity!)}` : 'Nenhum defeito aberto para os casos vinculados'}
-                          >
-                            <BugIcon className={`h-3 w-3 ${dInfo.openCount > 0 ? 'opacity-90' : 'opacity-50'}`} />
-                            <span className="font-mono">{dInfo.openCount}</span>
-                          </span>
+                            variant={dInfo.openCount > 0 ? 'attention' : 'default'}
+                          />
                         </div>
                         <div className="flex items-center gap-2">
                           {linkedCount > 0 && (
@@ -336,20 +334,17 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
                     <div className="flex items-center justify-center"><Badge className={priorityBadgeClass(req.priority)}>{priorityLabel(req.priority)}</Badge></div>
                     <div className="flex items-center justify-center"><Badge className={requirementStatusBadgeClass(req.status)}>{requirementStatusLabel(req.status)}</Badge></div>
                     <div className="flex items-center justify-end gap-2">
-                      <span
-                        className="inline-flex items-center gap-1 h-5 px-1.5 rounded-sm text-[11px] font-medium bg-muted/60 border border-border/40 text-foreground/80 min-w-[52px] justify-center hover:bg-muted/70 transition-colors"
+                      <InfoPill
+                        icon={LinkIcon}
+                        value={linkedCount}
                         title="Casos vinculados ao requisito"
-                      >
-                        <LinkIcon className="h-3 w-3 opacity-70" />
-                        <span className="font-mono">{linkedCount}</span>
-                      </span>
-                      <span
-                        className="inline-flex items-center gap-1 h-5 px-1.5 rounded-sm text-[11px] font-medium bg-muted/60 border border-border/40 text-foreground/80 min-w-[52px] justify-center hover:bg-muted/70 transition-colors"
+                      />
+                      <InfoPill
+                        icon={BugIcon}
+                        value={dInfo.openCount}
                         title={dInfo.openCount > 0 ? `Defeitos abertos • severidade: ${severityLabel(dInfo.maxSeverity!)}` : 'Nenhum defeito aberto para os casos vinculados'}
-                      >
-                        <BugIcon className={`h-3 w-3 ${dInfo.openCount > 0 ? 'opacity-90' : 'opacity-50'}`} />
-                        <span className="font-mono">{dInfo.openCount}</span>
-                      </span>
+                        variant={dInfo.openCount > 0 ? 'attention' : 'default'}
+                      />
                       {linkedCount > 0 && (
                         <StandardButton
                           variant="outline"

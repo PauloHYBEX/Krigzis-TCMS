@@ -11,7 +11,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { createProject, generateSlug, checkSlugExists } from '@/services/projectService';
 import { Project } from '@/types';
 import { Plus, FolderOpen, Settings } from 'lucide-react';
-import { ProjectManager } from '@/components/ProjectManager';
 import { toast } from '@/hooks/use-toast';
 
 export const ProjectSelector: React.FC = () => {
