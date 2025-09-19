@@ -271,7 +271,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
 
     const hasMarkers = lines.some(l => /^[-•\u00BA]/.test(l) || /^#\d+\s+/.test(l));
     if (opts?.centerShort && !hasMarkers) {
-      const isVeryShort = text.length < 40 && !/\r?\n/.test(text);
+      const isVeryShort = text.length < 80 && !/\r?\n/.test(text);
       if (isVeryShort) {
         return (
           <p className="text-gray-600 dark:text-gray-400 text-sm text-center">{text}</p>
@@ -506,7 +506,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
   const isShortDesc = (() => {
     const t = (desc || '').toString().trim();
     if (!t) return false;
-    if (t.length >= 15) return false;
+    if (t.length >= 80) return false;
     // se houver quebras ou marcadores, trata como texto longo/lista
     if (/\r?\n/.test(t)) return false;
     if (/^[-•\u00BA]|^#\d+\s+/.test(t)) return false;
