@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Edit, Trash2, Calendar, User, Sparkles, Loader2 } from 'lucide-react';
+import { Edit, Trash2, Calendar, User, Sparkles, Loader2, Code, LifeBuoy, Briefcase, Shield, Eye } from 'lucide-react';
 import { TestPlan, TestCase, TestExecution, Requirement, Defect } from '@/types';
 import { ExportDropdown } from './ExportDropdown';
 import { toast } from '@/components/ui/use-toast';
@@ -31,6 +31,7 @@ import {
   testCaseTypeBadgeClass,
 } from '@/lib/labels';
 import type { ExecutionStatus, TestCaseType } from '@/lib/labels';
+import { UserProfileModal } from './UserProfileModal';
 
 interface DetailModalProps {
   isOpen: boolean;
@@ -42,11 +43,16 @@ interface DetailModalProps {
 }
 
 export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: DetailModalProps) => {
+  const SINGLE_TENANT = String((import.meta as any).env?.VITE_SINGLE_TENANT ?? 'true') === 'true';
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
   const [additionalContext, setAdditionalContext] = useState('');
   const [selectedModelId, setSelectedModelId] = useState<string>('default');
+  const [author, setAuthor] = useState<{ id: string; email?: string; display_name?: string; avatar_url?: string; github_url?: string; google_url?: string; website_url?: string; tags?: any[] } | null>(null);
+  const [showAuthorModal, setShowAuthorModal] = useState(false);
+  const [authorRoles, setAuthorRoles] = useState<Array<{ role: 'desenvolvimento' | 'suporte' | 'gerencia' | 'supervisao' | 'visualizador'; icon?: string }>>([]);
+  const [authorTags, setAuthorTags] = useState<Array<{ label: string; icon?: string }>>([]);
 
   // Reset confirmDelete when modal is closed or item changes
   useEffect(() => {
@@ -58,8 +64,6 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
   useEffect(() => {
     setConfirmDelete(false);
   }, [item]);
-
-  if (!item) return null;
 
   const formatDate = (date: Date) => {
     return new Intl.DateTimeFormat('pt-BR', {
@@ -129,6 +133,96 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
     return (item as TestPlan | TestCase | Requirement | Defect).description || '';
   };
 
+  // Carrega informações do autor para exibir e-mail/link do perfil
+  useEffect(() => {
+    const loadAuthor = async () => {
+      if (!isOpen || !item || !('user_id' in (item as any))) return;
+      const uid = (item as any).user_id as string;
+      try {
+        // Buscar roles/cargos do autor (sempre que possível)
+        try {
+          const { data: rolesRows } = await supabase
+            .from('profile_function_roles' as any)
+            .select('role, icon')
+            .eq('user_id', uid);
+          if (Array.isArray(rolesRows)) {
+            setAuthorRoles(rolesRows as any);
+          } else {
+            setAuthorRoles([]);
+          }
+        } catch {
+          setAuthorRoles([]);
+        }
+        if (!SINGLE_TENANT) {
+          let data: any | null = null;
+          let error: any | null = null;
+          try {
+            const res = await supabase
+              .from('profiles' as any)
+              .select('id, email, display_name, avatar_url, github_url, google_url, website_url, tags')
+              .eq('id', uid)
+              .maybeSingle();
+            data = res.data; error = res.error;
+          } catch (e) {
+            error = e;
+          }
+          if (data && !error) {
+            setAuthor({
+              id: data.id,
+              email: (data as any).email,
+              display_name: (data as any).display_name,
+              avatar_url: (data as any).avatar_url,
+              github_url: (data as any).github_url,
+              google_url: (data as any).google_url,
+              website_url: (data as any).website_url,
+              tags: (data as any).tags || [],
+            });
+            if (Array.isArray((data as any).tags)) setAuthorTags((data as any).tags);
+            return;
+          }
+          // Fallback para colunas básicas caso algumas não existam ainda
+          try {
+            const resBasic = await supabase
+              .from('profiles' as any)
+              .select('id, email, display_name, tags')
+              .eq('id', uid)
+              .maybeSingle();
+            if (resBasic.data && !resBasic.error) {
+              setAuthor({ id: resBasic.data.id, email: resBasic.data.email, display_name: resBasic.data.display_name, tags: (resBasic.data as any).tags || [] });
+              const t = (resBasic.data as any).tags; if (Array.isArray(t)) setAuthorTags(t);
+              return;
+            }
+          } catch {}
+        }
+        const { data: authData } = await supabase.auth.getUser();
+        const me = authData?.user;
+        if (me && me.id === uid) {
+          setAuthor({
+            id: me.id,
+            email: me.email || undefined,
+            display_name: (me.user_metadata as any)?.full_name,
+            avatar_url: (me.user_metadata as any)?.avatar_url,
+            github_url: (me.user_metadata as any)?.github_url,
+            google_url: (me.user_metadata as any)?.google_url,
+            website_url: (me.user_metadata as any)?.website_url,
+            tags: (me.user_metadata as any)?.tags || [],
+          });
+          const rawT = (me.user_metadata as any)?.tags; if (Array.isArray(rawT)) setAuthorTags(rawT);
+        } else {
+          setAuthor({ id: uid });
+          setAuthorTags([]);
+        }
+      } catch {
+        setAuthor({ id: uid });
+        setAuthorRoles([]);
+        setAuthorTags([]);
+      }
+    };
+    loadAuthor();
+  }, [isOpen, item]);
+
+  if (!item) return null;
+
   const getItemDate = () => {
     if (type === 'execution') {
       return (item as TestExecution).executed_at;
@@ -154,7 +248,8 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
   };
 
   // Renderizador: converte texto em lista (ul/li) quando detecta marcadores ('-', '•', 'º', '#N ')
-  const renderListOrParagraph = (raw?: string) => {
+  // Comportamento extra: quando opts.centerShort=true centraliza textos curtos (<15 char) sem marcadores
+  const renderListOrParagraph = (raw?: string, opts?: { centerShort?: boolean }) => {
     const text = (raw ?? '').toString().trim();
     if (!text) return null;
 
@@ -175,6 +270,14 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
     }
 
     const hasMarkers = lines.some(l => /^[-•\u00BA]/.test(l) || /^#\d+\s+/.test(l));
+    if (opts?.centerShort && !hasMarkers) {
+      const isVeryShort = text.length < 40 && !/\r?\n/.test(text);
+      if (isVeryShort) {
+        return (
+          <p className="text-gray-600 dark:text-gray-400 text-sm text-center">{text}</p>
+        );
+      }
+    }
     if (hasMarkers) {
       const items = lines.map(l => {
         if (/^[-•]/.test(l)) return l.replace(/^[-•]\s*/, '');
@@ -222,6 +325,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
       .replace(/[\u2022\u25CF\u25A0\u2219]/g, '-')
       .replace(/[\u00A0]/g, ' ')
       .replace(/[\t ]+/g, ' ');
+    // eslint-disable-next-line no-control-regex
     s = s.replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, '');
     return s.trim();
   };
@@ -398,6 +502,17 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
     }
   };
 
+  const desc = getItemDescription();
+  const isShortDesc = (() => {
+    const t = (desc || '').toString().trim();
+    if (!t) return false;
+    if (t.length >= 15) return false;
+    // se houver quebras ou marcadores, trata como texto longo/lista
+    if (/\r?\n/.test(t)) return false;
+    if (/^[-•\u00BA]|^#\d+\s+/.test(t)) return false;
+    return true;
+  })();
+
   return (<>
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto text-center">
@@ -423,11 +538,29 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
               <Calendar className="h-4 w-4" />
               {type === 'execution' ? 'Executado em:' : 'Criado em:'} {formatDate(getItemDate())}
             </div>
-            <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+            <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 justify-center md:justify-start flex-wrap">
               <User className="h-4 w-4" />
-              ID do usuário: {item.user_id}
+              <span>Autor:</span>
+              <button type="button" className="text-brand hover:underline focus:outline-none bg-transparent border-0 p-0 h-auto" onClick={() => setShowAuthorModal(true)} title="Abrir perfil">
+                {author?.display_name || author?.email || 'ver perfil'}
+              </button>
+              {authorRoles.length > 0 && (
+                <span className="flex items-center gap-1 flex-wrap">
+                  {authorRoles.map((r, idx) => {
+                    const IconC = r.role === 'desenvolvimento' ? Code : r.role === 'suporte' ? LifeBuoy : r.role === 'gerencia' ? Briefcase : r.role === 'supervisao' ? Shield : Eye;
+                    const label = r.role.charAt(0).toUpperCase() + r.role.slice(1);
+                    return (
+                      <span key={idx} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-muted text-muted-foreground border">
+                        <IconC className="h-3.5 w-3.5" /> {label}
+                      </span>
+                    );
+                  })}
+                </span>
+              )}
             </div>
           </div>
+
+          {/* Removido: exibição duplicada de roles/tags. Mantemos apenas as tags de cargo ao lado do nome do autor. */}
 
           {/* Badges de status e prioridade */}
           <div className="flex gap-2 flex-wrap">
@@ -454,12 +587,16 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
           </div>
 
           {/* Descrição */}
-          {getItemDescription() && (
+          {desc && (
             <div>
-              <h3 className="font-medium mb-2">
-                {type === 'execution' ? 'Observações' : 'Descrição'}
+              <h3 className={`font-medium mb-2 ${isShortDesc ? 'text-center' : ''}`}>
+                Descrição
               </h3>
-              {renderListOrParagraph(getItemDescription())}
+              {isShortDesc ? (
+                <p className="text-sm text-gray-600 dark:text-gray-400 text-center">{desc}</p>
+              ) : (
+                renderListOrParagraph(desc)
+              )}
             </div>
           )}
 
@@ -476,25 +613,25 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
                 {obj && (
                   <div>
                     <h3 className="font-medium mb-2">Objetivo</h3>
-                    {renderListOrParagraph(obj)}
+                    {renderListOrParagraph(obj, { centerShort: true })}
                   </div>
                 )}
                 {scope && (
                   <div>
                     <h3 className="font-medium mb-2">Escopo</h3>
-                    {renderListOrParagraph(scope)}
+                    {renderListOrParagraph(scope, { centerShort: true })}
                   </div>
                 )}
                 {approach && (
                   <div>
                     <h3 className="font-medium mb-2">Abordagem</h3>
-                    {renderListOrParagraph(approach)}
+                    {renderListOrParagraph(approach, { centerShort: true })}
                   </div>
                 )}
                 {criteria && (
                   <div>
                     <h3 className="font-medium mb-2">Critérios</h3>
-                    {renderListOrParagraph(criteria)}
+                    {renderListOrParagraph(criteria, { centerShort: true })}
                   </div>
                 )}
               </div>
@@ -506,7 +643,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
               {item.preconditions && (
                 <div>
                   <h3 className="font-medium mb-2">Pré-condições</h3>
-                  <p className="text-gray-600 dark:text-gray-400 text-sm">{item.preconditions}</p>
+                  {renderListOrParagraph(item.preconditions, { centerShort: true })}
                 </div>
               )}
               
@@ -530,7 +667,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
               {item.expected_result && (
                 <div>
                   <h3 className="font-medium mb-2">Resultado Final Esperado</h3>
-                  <p className="text-gray-600 dark:text-gray-400 text-sm">{item.expected_result}</p>
+                  {renderListOrParagraph(item.expected_result, { centerShort: true })}
                 </div>
               )}
             </div>
@@ -541,7 +678,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
               {item.actual_result && (
                 <div>
                   <h3 className="font-medium mb-2">Resultado Obtido</h3>
-                  <p className="text-gray-600 dark:text-gray-400 text-sm">{item.actual_result}</p>
+                  {renderListOrParagraph(item.actual_result, { centerShort: true })}
                 </div>
               )}
 
@@ -599,9 +736,6 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
                   )}
                 </Button>
               )}
-              <Button variant="outline" onClick={handleClose}>
-                Fechar
-              </Button>
               {onEdit && (
                 <Button variant="outline" onClick={() => onEdit(item)}>
                   <Edit className="h-4 w-4 mr-1" />
@@ -622,6 +756,14 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Modal de Perfil do Autor */}
+    <UserProfileModal
+      isOpen={showAuthorModal}
+      onClose={() => setShowAuthorModal(false)}
+      userId={author?.id || (item as any).user_id}
+      initialProfile={author || undefined}
+    />
 
     <AlertDialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
       <AlertDialogContent>

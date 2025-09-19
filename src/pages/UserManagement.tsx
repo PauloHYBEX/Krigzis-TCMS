@@ -23,20 +23,19 @@ import {
   SelectValue 
 } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { UserCog, Shield, Users, Loader2, Search, UserPlus, Trash2, ChevronDown, ChevronUp, Sparkles, FileText, ClipboardCheck, Play, BarChart3, Download, Eye, Home, Clock, Zap, Settings, CheckCircle, Crown } from 'lucide-react';
+import { UserCog, Shield, Users, Loader2, Search, UserPlus, Trash2, ChevronDown, ChevronUp, Sparkles, FileText, ClipboardCheck, Play, BarChart3, Download, Eye, Home, Clock, Zap, Settings, CheckCircle, Crown, Check, X as XIcon, RefreshCcw } from 'lucide-react';
 import { 
   Dialog, 
   DialogContent, 
   DialogHeader, 
   DialogTitle, 
   DialogDescription,
-  DialogFooter,
-  DialogTrigger,
-  DialogClose
+  DialogTrigger
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { PermissionGuard } from '@/components/PermissionGuard';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,6 +59,8 @@ interface UserData extends User {
   };
   permissions?: {
     can_manage_users: boolean;
+    can_manage_projects: boolean;
+    can_delete_projects: boolean;
     can_manage_plans: boolean;
     can_manage_cases: boolean;
     can_manage_executions: boolean;
@@ -89,6 +90,15 @@ const roleColors = {
   viewer: 'bg-gray-100 text-gray-800 border-gray-300'
 };
 
+type FunctionRole = 'desenvolvimento' | 'suporte' | 'gerencia' | 'supervisao' | 'visualizador';
+type RoleRequest = {
+  id: string;
+  user_id: string;
+  requested_roles: FunctionRole[];
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+};
+
 export const UserManagement = () => {
   const { role, isMaster, updateUserToMaster, getDefaultPermissions } = usePermissions();
   const { user } = useAuth();
@@ -108,12 +118,18 @@ export const UserManagement = () => {
   const [inviteLoading, setInviteLoading] = useState(false);
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
   const [fixingMaster, setFixingMaster] = useState(false);
-  
+  const [syncingProfiles, setSyncingProfiles] = useState(false);
+
+  // Estado de solicitações
+  const [roleRequests, setRoleRequests] = useState<RoleRequest[]>([]);
+  const [assigning, setAssigning] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Record<string, Set<FunctionRole>>>({});
+
   // Recovery link modal state
   const [recoveryLink, setRecoveryLink] = useState<string | null>(null);
   const [recoveryLinkType, setRecoveryLinkType] = useState<'recovery' | 'magiclink' | null>(null);
   const [isRecoveryModalOpen, setIsRecoveryModalOpen] = useState(false);
-  
+
   // Helpers para o modal de link gerado (fora da interface)
   const handleCopyRecoveryLink = async () => {
     if (!recoveryLink) return;
@@ -128,12 +144,42 @@ export const UserManagement = () => {
   const handleOpenRecoveryLink = () => {
     if (recoveryLink) window.open(recoveryLink, '_blank', 'noopener,noreferrer');
   };
-  
+
+  // Sincronizar perfis a partir de auth.users (cria profiles e user_permissions ausentes)
+  const handleSyncProfiles = async () => {
+    if (SINGLE_TENANT) {
+      toast({ title: 'Ação indisponível', description: 'Sincronização não é necessária no modo single-tenant.' });
+      return;
+    }
+    if (!(role === 'master' || role === 'admin')) {
+      toast({ title: 'Acesso negado', description: 'Apenas Master/Admin podem sincronizar perfis.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setSyncingProfiles(true);
+      const { error } = await supabase.rpc('sync_profiles_from_auth');
+      if (error) {
+        console.error('sync_profiles_from_auth error:', error);
+        toast({ title: 'Falha ao sincronizar', description: error.message || 'Erro desconhecido.', variant: 'destructive' });
+        return;
+      }
+      await fetchUsers();
+      toast({ title: 'Perfis sincronizados', description: 'Perfis e permissões foram atualizados.' });
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: 'Erro', description: e?.message || 'Não foi possível sincronizar perfis.', variant: 'destructive' });
+    } finally {
+      setSyncingProfiles(false);
+    }
+  };
+
   // Form state for editing user
   const [editForm, setEditForm] = useState({
     role: 'viewer' as UserRole,
     display_name: '',
     can_manage_users: false,
+    can_manage_projects: false,
+    can_delete_projects: false,
     can_manage_plans: false,
     can_manage_cases: false,
     can_manage_executions: false,
@@ -146,10 +192,63 @@ export const UserManagement = () => {
     can_select_ai_models: false,
   });
 
+  // Helper: constrói a lista de usuários a partir de profiles, com upsert e permissões em lote
+  const buildUsersFromProfiles = useCallback(async (profiles: Array<{ id: string; display_name: string | null; role: string | null; email?: string | null; organization_id?: string | null }>) => {
+    try {
+      const ids = profiles.map(p => p.id);
+      if (ids.length > 0) {
+        try {
+          const upRows = ids.map(id => ({ user_id: id }));
+          await supabase.from('user_permissions' as any).upsert(upRows, { onConflict: 'user_id' } as any);
+        } catch (e) {
+          console.warn('user_permissions batch upsert (profiles) warning:', e);
+        }
+      }
+
+      const { data: permsList } = await supabase
+        .from('user_permissions' as any)
+        .select('user_id, can_manage_users, can_manage_projects, can_delete_projects, can_manage_plans, can_manage_cases, can_manage_executions, can_view_reports, can_use_ai')
+        .in('user_id', ids);
+      const permMap = new Map<string, any>((permsList || []).map((p: any) => [p.user_id, p]));
+
+      const usersWithDetails: UserData[] = profiles.map((p) => {
+        const perms = permMap.get(p.id) || {
+          can_manage_users: false,
+          can_manage_projects: false,
+          can_delete_projects: false,
+          can_manage_plans: true,
+          can_manage_cases: true,
+          can_manage_executions: true,
+          can_view_reports: true,
+          can_use_ai: true,
+        };
+        return {
+          id: p.id,
+          email: (p as any).email || `user_${p.id.slice(0, 8)}@sistema.local`,
+          app_metadata: {} as any,
+          user_metadata: {} as any,
+          aud: 'authenticated',
+          created_at: new Date().toISOString() as any,
+          profile: {
+            display_name: p.display_name,
+            role: (p.role as UserRole) || 'viewer',
+            organization_id: (p as any).organization_id || null
+          },
+          permissions: perms as any
+        } as UserData;
+      });
+
+      setUsers(usersWithDetails);
+    } catch (e) {
+      console.error('buildUsersFromProfiles error:', e);
+      setUsers([]);
+    }
+  }, []);
+
   const fetchUsers = useCallback(async () => {
     try {
       setLoading(true);
-      
+
       if (SINGLE_TENANT) {
         // No modo single-tenant, não buscamos no banco. Montamos um usuário local master.
         const { data: authData } = await supabase.auth.getUser();
@@ -176,52 +275,89 @@ export const UserManagement = () => {
         }
         return;
       }
-      
-      // Modo multi-tenant (padrão antigo): buscar perfis e permissões
-      const { data: profiles, error: profilesError } = await supabase
-        .from('profiles')
-        .select('id, display_name, role')
-        .order('display_name');
-      
-      if (profilesError) {
-        console.error('Error fetching profiles:', profilesError);
-        setUsers([]);
+
+      // Modo multi-tenant: listar DIRETAMENTE de auth.users via RPC, com left join em profiles
+      const { data: allUsers, error: listErr } = await supabase
+        .rpc('list_all_users');
+
+      if (listErr) {
+        console.error('Error listing all users via RPC:', listErr);
+        // Fallback: buscar via profiles
+        const { data: profiles, error: profilesError } = await supabase
+          .from('profiles' as any)
+          .select('id, display_name, role, email')
+          .order('display_name');
+        if (profilesError) {
+          setUsers([]);
+          toast({ title: 'Erro', description: 'Falha ao listar usuários.', variant: 'destructive' });
+          return;
+        }
+        await buildUsersFromProfiles(profiles as any[]);
         return;
       }
-      
-      const usersWithDetails = await Promise.all(
-        profiles.map(async (profile) => {
-          const { data: permissionsData } = await supabase
-            .from('user_permissions')
-            .select('can_manage_users, can_manage_plans, can_manage_cases, can_manage_executions, can_view_reports, can_use_ai, can_access_model_control, can_configure_ai_models, can_test_ai_connections, can_manage_ai_templates, can_select_ai_models')
-            .eq('user_id', profile.id)
-            .single();
-            
-          return {
-            id: profile.id,
-            email: `user_${profile.id.slice(0, 8)}@sistema.local`,
-            profile: {
-              display_name: profile.display_name,
-              role: profile.role as UserRole,
-              organization_id: (profile as any).organization_id || null
-            },
-            permissions: permissionsData || {
-              can_manage_users: false,
-              can_manage_plans: true,
-              can_manage_cases: true,
-              can_manage_executions: true,
-              can_view_reports: true,
-              can_use_ai: true,
-              can_access_model_control: false,
-              can_configure_ai_models: false,
-              can_test_ai_connections: false,
-              can_manage_ai_templates: false,
-              can_select_ai_models: true,
-            }
-          } as UserData;
-        })
-      );
-      
+
+      const rows = (allUsers || []) as Array<{ id: string; email: string | null; display_name: string | null; role: string | null; created_at: string }>;
+      const ids = rows.map(r => r.id);
+
+      // Fallback se não houver linhas (ex.: sem permissões ou função ausente)
+      if (rows.length === 0) {
+        const { data: profiles, error: profilesError } = await supabase
+          .from('profiles' as any)
+          .select('id, display_name, role, email')
+          .order('display_name');
+        if (profilesError) {
+          setUsers([]);
+          return;
+        }
+        await buildUsersFromProfiles(profiles as any[]);
+        return;
+      }
+
+      // Garante que todas as linhas existam em user_permissions para evitar 406 (upsert em lote)
+      if (ids.length > 0) {
+        try {
+          const upRows = ids.map((id) => ({ user_id: id }));
+          await supabase.from('user_permissions' as any).upsert(upRows, { onConflict: 'user_id' } as any);
+        } catch (e) {
+          console.warn('user_permissions batch upsert warning:', e);
+        }
+      }
+
+      // Carrega permissões em lote para evitar N+1
+      const { data: permsList } = await supabase
+        .from('user_permissions' as any)
+        .select('user_id, can_manage_users, can_manage_projects, can_delete_projects, can_manage_plans, can_manage_cases, can_manage_executions, can_view_reports, can_use_ai')
+        .in('user_id', ids);
+
+      const permMap = new Map<string, any>((permsList || []).map((p: any) => [p.user_id, p]));
+
+      const usersWithDetails: UserData[] = rows.map((r) => {
+        const perms = permMap.get(r.id) || {
+          can_manage_users: false,
+          can_manage_projects: false,
+          can_delete_projects: false,
+          can_manage_plans: true,
+          can_manage_cases: true,
+          can_manage_executions: true,
+          can_view_reports: true,
+          can_use_ai: true,
+        };
+        return {
+          id: r.id,
+          email: r.email || `user_${r.id.slice(0, 8)}@sistema.local`,
+          app_metadata: {} as any,
+          user_metadata: {} as any,
+          aud: 'authenticated',
+          created_at: r.created_at as any,
+          profile: {
+            display_name: r.display_name,
+            role: (r.role as UserRole) || 'viewer',
+            organization_id: null
+          },
+          permissions: perms as any
+        } as UserData;
+      });
+
       setUsers(usersWithDetails);
     } catch (error) {
       console.error('Error fetching users:', error);
@@ -242,12 +378,33 @@ export const UserManagement = () => {
     fetchUsers();
   }, [fetchUsers]);
 
+  // Carregar solicitações de cargo (multi-tenant)
+  useEffect(() => {
+    const loadRequests = async () => {
+      if (SINGLE_TENANT) { setRoleRequests([]); return; }
+      const { data, error } = await supabase
+        .from('role_requests' as any)
+        .select('id, user_id, requested_roles, status, created_at')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: true });
+      if (!error && data) {
+        setRoleRequests(data as any);
+        const init: Record<string, Set<FunctionRole>> = {};
+        for (const r of data as RoleRequest[]) init[r.user_id] = new Set(r.requested_roles);
+        setSelection(init);
+      }
+    };
+    loadRequests();
+  }, []);
+
   const handleEditUser = (user: UserData) => {
     setSelectedUser(user);
     setEditForm({
       role: user.profile?.role || 'tester',
       display_name: user.profile?.display_name || '',
       can_manage_users: user.permissions?.can_manage_users || false,
+      can_manage_projects: user.permissions?.can_manage_projects || false,
+      can_delete_projects: user.permissions?.can_delete_projects || false,
       can_manage_plans: user.permissions?.can_manage_plans || true,
       can_manage_cases: user.permissions?.can_manage_cases || true,
       can_manage_executions: user.permissions?.can_manage_executions || true,
@@ -343,6 +500,46 @@ export const UserManagement = () => {
     return role === 'master';
   };
 
+  // === Utilitários da aba Solicitações (definidos antes do JSX) ===
+  const toggleRole = (userId: string, r: FunctionRole) => {
+    setSelection(prev => {
+      const next = { ...prev };
+      const set = new Set(next[userId] || []);
+      if (set.has(r)) set.delete(r); else set.add(r);
+      next[userId] = set;
+      return next;
+    });
+  };
+
+  const approveRequest = async (req: RoleRequest) => {
+    if (SINGLE_TENANT) return;
+    try {
+      setAssigning(req.id);
+      const roles = Array.from(selection[req.user_id] || new Set<FunctionRole>());
+      if (roles.length === 0) return;
+      const rows = roles.map(role => ({ user_id: req.user_id, role }));
+      const { error: upErr } = await supabase.from('profile_function_roles' as any).upsert(rows, { onConflict: 'user_id,role' } as any);
+      if (upErr) throw upErr;
+      const { error: stErr } = await supabase.from('role_requests' as any).update({ status: 'approved' }).eq('id', req.id);
+      if (stErr) throw stErr;
+      setRoleRequests(prev => prev.filter(r => r.id !== req.id));
+    } finally {
+      setAssigning(null);
+    }
+  };
+
+  const rejectRequest = async (req: RoleRequest) => {
+    if (SINGLE_TENANT) return;
+    try {
+      setAssigning(req.id);
+      const { error } = await supabase.from('role_requests' as any).update({ status: 'rejected' }).eq('id', req.id);
+      if (error) throw error;
+      setRoleRequests(prev => prev.filter(r => r.id !== req.id));
+    } finally {
+      setAssigning(null);
+    }
+  };
+
   // Expand/collapse
   const toggleUserExpand = (id: string) => {
     setExpandedUser(prev => (prev === id ? null : id));
@@ -357,9 +554,9 @@ export const UserManagement = () => {
       // Mantém como master no estado local
       setUsers(prev => prev.map(u => (u.id === id ? {
         ...u,
-        profile: { display_name: u.profile?.display_name || '', role: 'master' as UserRole },
+        profile: { display_name: u.profile?.display_name || '', role: 'master' as UserRole, organization_id: u.profile?.organization_id || null },
         permissions: getDefaultPermissions('master')
-      } : u)));
+      } : u)) as UserData[]);
       return;
     }
     // Multi-tenant: apenas master pode alterar
@@ -368,14 +565,12 @@ export const UserManagement = () => {
       return;
     }
     try {
-      const target = users.find(u => u.id === id);
-      const { error } = await supabase.rpc('set_user_role', {
-        target_user_id: id,
-        target_role: newRole,
-        target_org_id: null
-      } as any);
+      const { error } = await supabase
+        .from('profiles' as any)
+        .update({ role: newRole })
+        .eq('id', id);
       if (error) {
-        console.error('RPC set_user_role error:', error);
+        console.error('profiles update role error:', error);
         toast({ title: 'Falha ao alterar papel', description: error.message || 'Erro desconhecido.', variant: 'destructive' });
         return;
       }
@@ -409,30 +604,13 @@ export const UserManagement = () => {
       return;
     }
     try {
-      const target = users.find(u => u.id === id);
-      const currentPerms = {
-        can_manage_users: !!target?.permissions?.can_manage_users,
-        can_manage_plans: target?.permissions?.can_manage_plans ?? true,
-        can_manage_cases: target?.permissions?.can_manage_cases ?? true,
-        can_manage_executions: target?.permissions?.can_manage_executions ?? true,
-        can_view_reports: target?.permissions?.can_view_reports ?? true,
-        can_use_ai: target?.permissions?.can_use_ai ?? true,
-        can_access_model_control: !!target?.permissions?.can_access_model_control,
-        can_configure_ai_models: !!target?.permissions?.can_configure_ai_models,
-        can_test_ai_connections: !!target?.permissions?.can_test_ai_connections,
-        can_manage_ai_templates: !!target?.permissions?.can_manage_ai_templates,
-        can_select_ai_models: target?.permissions?.can_select_ai_models ?? true,
-      } as Record<string, boolean>;
-      // aplica alteração solicitada
-      currentPerms[permission] = value;
-
-      const { error } = await supabase.rpc('set_user_permissions', {
-        target_user_id: id,
-        perms: currentPerms
-      } as any);
-      if (error) {
-        console.error('RPC set_user_permissions error:', error);
-        toast({ title: 'Falha ao alterar permissão', description: error.message || 'Erro desconhecido.', variant: 'destructive' });
+      // Atualiza somente a coluna alterada na tabela user_permissions
+      const { error: upErr } = await supabase
+        .from('user_permissions' as any)
+        .upsert({ user_id: id, [permission]: value } as any, { onConflict: 'user_id' } as any);
+      if (upErr) {
+        console.error('user_permissions upsert error:', upErr);
+        toast({ title: 'Falha ao alterar permissão', description: upErr.message || 'Erro desconhecido.', variant: 'destructive' });
         return;
       }
       // Atualiza estado local
@@ -554,8 +732,33 @@ export const UserManagement = () => {
             Gerencie os usuários do sistema e suas permissões
           </p>
         </div>
-        
+
         <div className="flex gap-2">
+          {/* Sincronizar perfis (ícone + tooltip) */}
+          {!SINGLE_TENANT && (role === 'master' || role === 'admin') && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleSyncProfiles}
+                    disabled={syncingProfiles}
+                    className="text-emerald-600 hover:text-emerald-700"
+                  >
+                    {syncingProfiles ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCcw className="h-4 w-4" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Sincronizar Perfis
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           {/* Botão para corrigir usuário master (apenas em SINGLE_TENANT) */}
           {SINGLE_TENANT && role !== 'master' && (
             <Button 
@@ -577,7 +780,7 @@ export const UserManagement = () => {
               )}
             </Button>
           )}
-          
+
           {/* Convite de usuário: apenas para Master e fora do SINGLE_TENANT */}
           {!SINGLE_TENANT && role === 'master' && (
           <Dialog open={isInviteModalOpen} onOpenChange={setIsInviteModalOpen}>
@@ -604,7 +807,7 @@ export const UserManagement = () => {
                     onChange={(e) => setInviteEmail(e.target.value)} 
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="role">Nível de Acesso</Label>
                   <Select value={inviteRole} onValueChange={(value: UserRole) => setInviteRole(value)}>
@@ -620,7 +823,7 @@ export const UserManagement = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <Button 
                   className="w-full" 
                   onClick={handleInviteUser}
@@ -641,17 +844,13 @@ export const UserManagement = () => {
           )}
         </div>
       </div>
-      
+
       <Tabs defaultValue="all">
         <TabsList>
           <TabsTrigger value="all">Todos os Usuários</TabsTrigger>
-          <TabsTrigger value="master">Masters</TabsTrigger>
-          <TabsTrigger value="admin">Administradores</TabsTrigger>
-          <TabsTrigger value="manager">Gerentes</TabsTrigger>
-          <TabsTrigger value="tester">Testadores</TabsTrigger>
-          <TabsTrigger value="viewer">Visualizadores</TabsTrigger>
+          <TabsTrigger value="requests">Solicitações</TabsTrigger>
         </TabsList>
-        
+
         <TabsContent value="all" className="p-0">
           <UserTable 
             users={filteredUsers} 
@@ -665,24 +864,67 @@ export const UserManagement = () => {
             isMaster={isMaster()}
           />
         </TabsContent>
-        
-        {['master', 'admin', 'manager', 'tester', 'viewer'].map(roleFilter => (
-          <TabsContent key={roleFilter} value={roleFilter} className="p-0">
-            <UserTable 
-              users={filteredUsers.filter(u => u.profile?.role === roleFilter)} 
-              loading={loading} 
-              expandedUser={expandedUser}
-              canManageUser={canManageUser}
-              toggleUserExpand={toggleUserExpand}
-              handleRoleChange={handleRoleChange}
-              handlePermissionChange={handlePermissionChange}
-              handleDeleteUser={handleDeleteUser}
-              isMaster={isMaster()}
-            />
-          </TabsContent>
-        ))}
+
+        <TabsContent value="requests" className="p-0">
+          {SINGLE_TENANT ? (
+            <Card>
+              <CardContent className="p-6 text-sm text-muted-foreground">Solicitações desativadas no modo single-tenant.</CardContent>
+            </Card>
+          ) : roleRequests.length === 0 ? (
+            <Card>
+              <CardContent className="p-6 text-sm text-muted-foreground">Sem solicitações pendentes</CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Usuário</TableHead>
+                      <TableHead>Solicitado</TableHead>
+                      <TableHead>Selecionar cargos</TableHead>
+                      <TableHead className="w-[160px]">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {roleRequests.map((r) => (
+                      <TableRow key={r.id}>
+                        <TableCell>{users.find(u => u.id === r.user_id)?.profile?.display_name || users.find(u => u.id === r.user_id)?.email || r.user_id}</TableCell>
+                        <TableCell>{r.requested_roles.join(', ')}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-2 text-xs">
+                            {(['desenvolvimento','suporte','gerencia','supervisao','visualizador'] as FunctionRole[]).map((fr) => (
+                              <label key={fr} className="inline-flex items-center gap-1 border rounded px-2 py-1">
+                                <input
+                                  type="checkbox"
+                                  checked={!!selection[r.user_id]?.has(fr)}
+                                  onChange={() => toggleRole(r.user_id, fr)}
+                                />
+                                <span className="capitalize">{fr}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <Button size="sm" onClick={() => approveRequest(r)} disabled={assigning === r.id}>
+                              <Check className="h-4 w-4 mr-1" /> Aprovar
+                            </Button>
+                            <Button size="sm" variant="destructive" onClick={() => rejectRequest(r)} disabled={assigning === r.id}>
+                              <XIcon className="h-4 w-4 mr-1" /> Rejeitar
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
       </Tabs>
-      
+
       {/* Modal de link de recuperação/magic link */}
       <Dialog open={isRecoveryModalOpen} onOpenChange={setIsRecoveryModalOpen}>
         <DialogContent>
@@ -702,11 +944,7 @@ export const UserManagement = () => {
               <Button variant="outline" onClick={handleOpenRecoveryLink}>Abrir</Button>
             </div>
           </div>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="secondary">Fechar</Button>
-            </DialogClose>
-          </DialogFooter>
+          {/* Removido botão 'Fechar' redundante (já existe X no cabeçalho) */}
         </DialogContent>
       </Dialog>
 
@@ -815,15 +1053,10 @@ const UserTable = ({
               acc.push(
                 
                 <TableRow key={user.id}>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-700 font-medium">
-                        {user.profile?.display_name ? user.profile.display_name.charAt(0).toUpperCase() : user.email.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <div className="font-medium">{user.profile?.display_name || 'Usuário'}</div>
-                        <div className="text-sm text-muted-foreground">{user.email}</div>
-                      </div>
+                  <TableCell className="align-middle">
+                    <div className="min-w-0">
+                      <div className="font-medium text-left">{user.profile?.display_name || 'Usuário'}</div>
+                      <div className="text-sm text-muted-foreground text-left truncate">{user.email}</div>
                     </div>
                   </TableCell>
                   <TableCell>
@@ -933,6 +1166,30 @@ const UserTable = ({
                                 <Switch 
                                   checked={user.permissions?.can_manage_users}
                                   onCheckedChange={(checked) => handlePermissionChange(user.id, 'can_manage_users', checked)}
+                                  disabled={!canManageUser(user.profile?.role || 'tester')}
+                                />
+                              </div>
+
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <Settings className="h-4 w-4 text-emerald-500" />
+                                  <Label>Gerenciar Projetos</Label>
+                                </div>
+                                <Switch
+                                  checked={Boolean((user as any).permissions?.can_manage_projects)}
+                                  onCheckedChange={(checked) => handlePermissionChange(user.id, 'can_manage_projects' as any, checked)}
+                                  disabled={!canManageUser(user.profile?.role || 'tester')}
+                                />
+                              </div>
+
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <Trash2 className="h-4 w-4 text-red-500" />
+                                  <Label>Excluir Projetos</Label>
+                                </div>
+                                <Switch
+                                  checked={Boolean((user as any).permissions?.can_delete_projects)}
+                                  onCheckedChange={(checked) => handlePermissionChange(user.id, 'can_delete_projects' as any, checked)}
                                   disabled={!canManageUser(user.profile?.role || 'tester')}
                                 />
                               </div>

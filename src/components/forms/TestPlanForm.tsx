@@ -60,15 +60,15 @@ export const TestPlanForm = ({ onSuccess, onCancel, initialData }: TestPlanFormP
         const saved = JSON.parse(raw);
         setFormData(prev => ({ ...prev, ...saved }));
       }
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    } catch (e) { /* noop */ }
+     
   }, [storageKey]);
 
   // Persist draft on change
   useEffect(() => {
     try {
       localStorage.setItem(storageKey, JSON.stringify(formData));
-    } catch {}
+    } catch (e) { /* noop */ }
   }, [formData, storageKey]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -97,7 +97,7 @@ export const TestPlanForm = ({ onSuccess, onCancel, initialData }: TestPlanFormP
       }
 
       onSuccess?.(plan);
-      try { localStorage.removeItem(storageKey); } catch {}
+      try { localStorage.removeItem(storageKey); } catch (e) { /* noop */ }
     } catch (error) {
       console.error('Erro ao salvar plano:', error);
       toast({
@@ -269,7 +269,7 @@ export const TestPlanForm = ({ onSuccess, onCancel, initialData }: TestPlanFormP
 
           <div className="flex gap-2 justify-end">
             {onCancel && (
-              <Button type="button" variant="outline" onClick={() => { try { localStorage.removeItem(storageKey); } catch {} onCancel?.(); }}>
+              <Button type="button" variant="outline" onClick={() => { try { localStorage.removeItem(storageKey); } catch (e) { /* noop */ } onCancel?.(); }}>
                 Cancelar
               </Button>
             )}

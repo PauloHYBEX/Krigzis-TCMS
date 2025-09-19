@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ListChecks,
+  Wrench,
 } from 'lucide-react';
 import KrigzisLogo from '@/components/branding/KrigzisLogo';
 import { cn } from '@/lib/utils';
@@ -32,8 +33,9 @@ const navigation = [
 
 // Itens administrativos (sub-menu colapsável)
 const adminNavigation = [
+  { name: 'Projetos', href: '/project-admin', icon: Wrench, requiredPermission: 'can_manage_projects' },
+  { name: 'Usuários', href: '/user-management', icon: Settings, requiredPermission: 'can_manage_users' },
   { name: 'MCP', href: '/model-control', icon: Settings, requiredPermission: 'can_access_model_control' },
-  // Futuro: adicionar mais opções administrativas aqui
 ];
 
 export const Sidebar = () => {
@@ -149,7 +151,7 @@ export const Sidebar = () => {
             })}
 
             {/* Submenu Administrativo */}
-            {(isMaster() || hasPermission('can_access_admin_menu')) && (
+            {(isMaster() || hasPermission('can_access_admin_menu') || hasPermission('can_manage_users')) && (
               <div className="mt-4">
                 <button
                   type="button"
@@ -199,9 +201,6 @@ export const Sidebar = () => {
                           <item.icon className="h-4 w-4 mr-3" />
                           <div className="flex items-center justify-between w-full">
                             <span>{item.name}</span>
-                            {item.href === '/model-control' && (
-                              <span className="ml-2 text-[10px] uppercase px-1.5 py-0.5 rounded bg-brand text-brand-foreground">Admin</span>
-                            )}
                           </div>
                         </Link>
                       );

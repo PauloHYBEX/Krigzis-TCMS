@@ -65,8 +65,8 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
         const saved = JSON.parse(raw);
         setFormData(prev => ({ ...prev, ...saved }));
       }
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    } catch (e) { /* noop */ }
+     
   }, [storageKey]);
 
   useEffect(() => {
@@ -104,7 +104,7 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
   useEffect(() => {
     try {
       localStorage.setItem(storageKey, JSON.stringify(formData));
-    } catch {}
+    } catch (e) { /* noop */ }
   }, [formData, storageKey]);
 
   const loadPlans = async () => {
@@ -143,7 +143,7 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
           description: 'Execução atualizada com sucesso!'
         });
         onSuccess?.(updated);
-        try { localStorage.removeItem(storageKey); } catch {}
+        try { localStorage.removeItem(storageKey); } catch (e) { /* noop */ }
       } else {
         // Validação: garantir que o caso pertence ao plano selecionado
         const chosenCase = cases.find(c => c.id === formData.case_id);
@@ -166,7 +166,7 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
           description: "Execução registrada com sucesso!"
         });
         onSuccess?.(created);
-        try { localStorage.removeItem(storageKey); } catch {}
+        try { localStorage.removeItem(storageKey); } catch (e) { /* noop */ }
       }
     } catch (error) {
       console.error('Erro ao criar execução:', error);
@@ -314,7 +314,7 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
 
           <div className="flex gap-2 justify-end">
             {onCancel && (
-              <Button type="button" variant="outline" onClick={() => { try { localStorage.removeItem(storageKey); } catch {} onCancel?.(); }}>
+              <Button type="button" variant="outline" onClick={() => { try { localStorage.removeItem(storageKey); } catch (e) { /* noop */ } onCancel?.(); }}>
                 Cancelar
               </Button>
             )}

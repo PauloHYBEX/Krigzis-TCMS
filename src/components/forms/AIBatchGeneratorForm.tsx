@@ -58,7 +58,7 @@ export const AIBatchGeneratorForm = ({ onSuccess, type = 'plan', mode = 'standar
     try {
       const payload = { documentContent, context, selectedModel };
       localStorage.setItem('ai-batch-form-state', JSON.stringify(payload));
-    } catch {}
+    } catch (e) { /* noop: falha ao persistir estado não deve quebrar a UI */ }
   }, [documentContent, context, selectedModel]);
 
   useEffect(() => {
@@ -85,6 +85,7 @@ export const AIBatchGeneratorForm = ({ onSuccess, type = 'plan', mode = 'standar
       .replace(/[\u00A0]/g, ' ') // espaço não separável
       .replace(/[\t ]+/g, ' '); // colapsa espaços
     // remove caracteres de controle e emojis fora dos intervalos comuns
+    // eslint-disable-next-line no-control-regex
     s = s.replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, '');
     return s.trim();
   };

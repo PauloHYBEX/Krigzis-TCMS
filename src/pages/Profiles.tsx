@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import type { Database } from '@/integrations/supabase/types';
 import { usePermissions, UserRole } from '@/hooks/usePermissions';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/components/ui/use-toast';
@@ -10,12 +9,30 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Users, Plus, Edit, Loader2, Search } from 'lucide-react';
+import { Users, Plus, Edit, Loader2, Search, Check, X as XIcon } from 'lucide-react';
 
 // Flag single-tenant: mantém consistência com UserManagement
 const SINGLE_TENANT = String((import.meta as any).env?.VITE_SINGLE_TENANT ?? 'true') === 'true';
 
-type Profile = Database['public']['Tables']['profiles']['Row'];
+type Profile = {
+  id: string;
+  display_name: string | null;
+  email: string | null;
+  role: UserRole | string | null;
+  created_at: string;
+  updated_at: string;
+  organization_id: string | null;
+};
+
+type FunctionRole = 'desenvolvimento' | 'suporte' | 'gerencia' | 'supervisao' | 'visualizador';
+
+type RoleRequest = {
+  id: string;
+  user_id: string;
+  requested_roles: FunctionRole[];
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+};
 
 const roleLabels: Record<UserRole, string> = {
   master: 'Master',
@@ -34,6 +51,9 @@ export const Profiles: React.FC = () => {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | UserRole>('all');
+  const [roleRequests, setRoleRequests] = useState<RoleRequest[]>([]);
+  const [assigning, setAssigning] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Record<string, Set<FunctionRole>>>({});
 
   // Modais (placeholders)
   const [openCreate, setOpenCreate] = useState(false);
@@ -84,9 +104,25 @@ export const Profiles: React.FC = () => {
     }
   }, [toast]);
 
+  const fetchRoleRequests = useCallback(async () => {
+    if (SINGLE_TENANT) { setRoleRequests([]); return; }
+    const { data, error } = await supabase
+      .from('role_requests' as any)
+      .select('id, user_id, requested_roles, status, created_at')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true });
+    if (!error && data) {
+      setRoleRequests(data as any);
+      const init: Record<string, Set<FunctionRole>> = {};
+      for (const r of data as RoleRequest[]) init[r.user_id] = new Set(r.requested_roles);
+      setSelection(init);
+    }
+  }, []);
+
   useEffect(() => {
     fetchProfiles();
-  }, [fetchProfiles]);
+    fetchRoleRequests();
+  }, [fetchProfiles, fetchRoleRequests]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -99,6 +135,47 @@ export const Profiles: React.FC = () => {
       (p.display_name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q)
     );
   }, [profiles, search, activeTab]);
+
+  const toggleRole = (userId: string, role: FunctionRole) => {
+    setSelection((prev) => {
+      const next = { ...prev };
+      const set = new Set(next[userId] || []);
+      if (set.has(role)) set.delete(role); else set.add(role);
+      next[userId] = set;
+      return next;
+    });
+  };
+
+  const approveRequest = async (req: RoleRequest) => {
+    if (SINGLE_TENANT) return;
+    try {
+      setAssigning(req.id);
+      const roles = Array.from(selection[req.user_id] || new Set<FunctionRole>());
+      if (roles.length === 0) return;
+      // Upsert roles em profile_function_roles
+      const rows = roles.map(r => ({ user_id: req.user_id, role: r }));
+      const { error: upErr } = await supabase.from('profile_function_roles' as any).upsert(rows, { onConflict: 'user_id,role' } as any);
+      if (upErr) throw upErr;
+      // Atualizar status da request
+      const { error: stErr } = await supabase.from('role_requests' as any).update({ status: 'approved' }).eq('id', req.id);
+      if (stErr) throw stErr;
+      setRoleRequests((prev) => prev.filter(r => r.id !== req.id));
+    } finally {
+      setAssigning(null);
+    }
+  };
+
+  const rejectRequest = async (req: RoleRequest) => {
+    if (SINGLE_TENANT) return;
+    try {
+      setAssigning(req.id);
+      const { error } = await supabase.from('role_requests' as any).update({ status: 'rejected' }).eq('id', req.id);
+      if (error) throw error;
+      setRoleRequests((prev) => prev.filter(r => r.id !== req.id));
+    } finally {
+      setAssigning(null);
+    }
+  };
 
   const handleOpenCreate = () => {
     if (SINGLE_TENANT) {
@@ -207,6 +284,62 @@ export const Profiles: React.FC = () => {
           </Tabs>
         </CardContent>
       </Card>
+
+      {!SINGLE_TENANT && hasPermission('can_manage_users') && (
+        <Card className="h-full flex flex-col">
+          <CardHeader className="p-4 pb-3">
+            <CardTitle className="text-base">Solicitações de Cargo</CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 pt-0 space-y-3">
+            {roleRequests.length === 0 ? (
+              <div className="text-sm text-muted-foreground">Sem solicitações pendentes</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Usuário</TableHead>
+                    <TableHead>Solicitado</TableHead>
+                    <TableHead>Selecionar cargos</TableHead>
+                    <TableHead className="w-[160px]">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {roleRequests.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell>{profiles.find(p => p.id === r.user_id)?.display_name || r.user_id}</TableCell>
+                      <TableCell>{r.requested_roles.join(', ')}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-2 text-xs">
+                          {(['desenvolvimento','suporte','gerencia','supervisao','visualizador'] as FunctionRole[]).map((fr) => (
+                            <label key={fr} className="inline-flex items-center gap-1 border rounded px-2 py-1">
+                              <input
+                                type="checkbox"
+                                checked={!!selection[r.user_id]?.has(fr)}
+                                onChange={() => toggleRole(r.user_id, fr)}
+                              />
+                              <span className="capitalize">{fr}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={() => approveRequest(r)} disabled={assigning === r.id}>
+                            <Check className="h-4 w-4 mr-1" /> Aprovar
+                          </Button>
+                          <Button size="sm" variant="destructive" onClick={() => rejectRequest(r)} disabled={assigning === r.id}>
+                            <XIcon className="h-4 w-4 mr-1" /> Rejeitar
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Modal: Criar Perfil (placeholder) */}
       <Dialog open={openCreate} onOpenChange={setOpenCreate}>

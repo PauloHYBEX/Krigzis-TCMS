@@ -176,7 +176,6 @@ export const AIBatchModal = ({
               {plans.filter(p => p.status === 'rejected').length} rejeitados, {' '}
               {plans.filter(p => p.status === 'pending').length} pendentes
             </div>
-            <Button onClick={onClose}>Fechar</Button>
           </div>
         </DialogContent>
       </Dialog>

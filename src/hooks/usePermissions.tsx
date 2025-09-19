@@ -4,12 +4,14 @@ import { supabase } from '@/integrations/supabase/client';
 
 // Single-tenant mode: when true, we bypass remote permissions and force master permissions
 // Default to true if env is missing (safer for private/single setup)
-const SINGLE_TENANT = String((import.meta as any).env?.VITE_SINGLE_TENANT ?? 'true') === 'true';
+const SINGLE_TENANT = String(import.meta.env?.VITE_SINGLE_TENANT ?? 'true') === 'true';
 
 export type UserRole = 'master' | 'admin' | 'manager' | 'tester' | 'viewer';
 
 export interface UserPermissions {
   can_manage_users: boolean;
+  can_manage_projects: boolean;
+  can_delete_projects: boolean;
   can_manage_plans: boolean;
   can_manage_cases: boolean;
   can_manage_executions: boolean;
@@ -26,6 +28,8 @@ export interface UserPermissions {
 
 const DEFAULT_PERMISSIONS: UserPermissions = {
   can_manage_users: false,
+  can_manage_projects: false,
+  can_delete_projects: false,
   can_manage_plans: false,
   can_manage_cases: false,
   can_manage_executions: false,
@@ -44,6 +48,8 @@ const getDefaultPermissions = (role: UserRole): UserPermissions => {
     case 'master':
       return {
         can_manage_users: true,
+        can_manage_projects: true,
+        can_delete_projects: true,
         can_manage_plans: true,
         can_manage_cases: true,
         can_manage_executions: true,
@@ -59,6 +65,8 @@ const getDefaultPermissions = (role: UserRole): UserPermissions => {
     case 'admin':
       return {
         can_manage_users: true,
+        can_manage_projects: true,
+        can_delete_projects: false,
         can_manage_plans: true,
         can_manage_cases: true,
         can_manage_executions: true,
@@ -74,6 +82,8 @@ const getDefaultPermissions = (role: UserRole): UserPermissions => {
     case 'manager':
       return {
         can_manage_users: false,
+        can_manage_projects: false,
+        can_delete_projects: false,
         can_manage_plans: true,
         can_manage_cases: true,
         can_manage_executions: true,
@@ -89,6 +99,8 @@ const getDefaultPermissions = (role: UserRole): UserPermissions => {
     case 'tester':
       return {
         can_manage_users: false,
+        can_manage_projects: false,
+        can_delete_projects: false,
         can_manage_plans: false,
         can_manage_cases: false,
         can_manage_executions: true,
@@ -104,6 +116,8 @@ const getDefaultPermissions = (role: UserRole): UserPermissions => {
     case 'viewer':
       return {
         can_manage_users: false,
+        can_manage_projects: false,
+        can_delete_projects: false,
         can_manage_plans: false,
         can_manage_cases: false,
         can_manage_executions: false,
@@ -276,6 +290,8 @@ export const PermissionsProvider = ({ children }: PermissionsProviderProps) => {
   const hasPermission = (permission: keyof Omit<UserPermissions, 'role'>) => {
     const adminPermissions = [
       'can_manage_users',
+      'can_manage_projects',
+      'can_delete_projects', 
       'can_manage_plans', 
       'can_manage_cases',
       'can_manage_executions',

@@ -137,7 +137,7 @@ export const TestCases = () => {
 
   // Casos filtrados e ordenados
   const filteredCases = useMemo(() => {
-    let filtered = cases.filter(testCase => {
+    const filtered = cases.filter(testCase => {
       const matchesSearch = searchTerm === '' || 
         testCase.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         testCase.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -162,10 +162,13 @@ export const TestCases = () => {
         case 'updated_at':
           comparison = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
           break;
-        case 'priority':
-          const priorityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
-          comparison = (priorityOrder[a.priority as keyof typeof priorityOrder] || 0) - (priorityOrder[b.priority as keyof typeof priorityOrder] || 0);
+        case 'priority': {
+          const priorityOrder = { critical: 4, high: 3, medium: 2, low: 1 } as const;
+          const pa = priorityOrder[a.priority as keyof typeof priorityOrder] || 0;
+          const pb = priorityOrder[b.priority as keyof typeof priorityOrder] || 0;
+          comparison = pa - pb;
           break;
+        }
       }
       
       return sortOrder === 'asc' ? comparison : -comparison;
@@ -308,6 +311,8 @@ export const TestCases = () => {
         <StandardButton 
           onClick={() => setShowForm(true)}
           className="bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0"
+          disabled={!currentProject || currentProject.status !== 'active'}
+          title={!currentProject ? 'Selecione um projeto ativo para criar casos' : (currentProject.status !== 'active' ? 'Projeto não ativo — criação desabilitada' : undefined)}
         >
           <Plus className="h-4 w-4 mr-2" />
           Novo Caso de Teste
@@ -390,7 +395,7 @@ export const TestCases = () => {
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
                 <Filter className="h-4 w-4 mr-2" />
-                {filterStatus === 'all' ? 'Todos' : `Prioridade: ${priorityLabel(filterStatus as any)}`}
+                {filterStatus === 'all' ? 'Todos' : `Prioridade: ${priorityLabel(filterStatus as 'low'|'medium'|'high'|'critical')}`}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -435,12 +440,15 @@ export const TestCases = () => {
           </DropdownMenu>
         </div>
       </div>
-
       {/* Content */}
       {viewMode === 'cards' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredCases.length > 0 ? paginatedCases.map((testCase) => (
-            <Card key={testCase.id} className="hover:shadow-lg transition-all duration-200 border border-border/50 hover:border-brand/50">
+            <Card
+              key={testCase.id}
+              className="border border-border/50 cursor-pointer card-hover"
+              onClick={() => handleViewDetails(testCase)}
+            >
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-2 min-w-0">
@@ -475,7 +483,7 @@ export const TestCases = () => {
                   <StandardButton 
                     variant="outline" 
                     size="sm"
-                    onClick={() => handleViewDetails(testCase)}
+                    onClick={(e) => { e.stopPropagation(); handleViewDetails(testCase); }}
                   >
                     Ver Detalhes
                   </StandardButton>
@@ -546,6 +554,8 @@ export const TestCases = () => {
                           e.stopPropagation();
                           handleEdit(testCase);
                         }}
+                        disabled={!currentProject || currentProject.status !== 'active'}
+                        title={!currentProject ? 'Selecione um projeto ativo para editar casos' : (currentProject.status !== 'active' ? 'Projeto não ativo — edição desabilitada' : undefined)}
                         className="h-8 w-8 p-0"
                       >
                         <Edit className="h-4 w-4" />
@@ -577,6 +587,8 @@ export const TestCases = () => {
               <StandardButton
                 onClick={() => setShowForm(true)}
                 className="bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0"
+                disabled={!currentProject || currentProject.status !== 'active'}
+                title={!currentProject ? 'Selecione um projeto ativo para criar casos' : (currentProject.status !== 'active' ? 'Projeto não ativo — criação desabilitada' : undefined)}
               >
                 <Plus className="h-4 w-4 mr-2" />
                 Criar Primeiro Caso

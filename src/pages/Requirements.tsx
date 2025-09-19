@@ -25,6 +25,7 @@ import {
 import SearchableCombobox from '@/components/SearchableCombobox';
 import { Input } from '@/components/ui/input';
 import { ViewModeToggle } from '@/components/ViewModeToggle';
+import { DetailModal } from '@/components/DetailModal';
 import { useProject } from '@/contexts/ProjectContext';
 import { usePermissions } from '@/hooks/usePermissions';
 
@@ -39,6 +40,8 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Requirement | null>(null);
+  const [selectedReq, setSelectedReq] = useState<Requirement | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
   const [viewMode, setViewMode] = useState<'cards' | 'list'>(() => {
     if (preferredViewMode) return preferredViewMode;
     const saved = localStorage.getItem('requirements_viewMode');
@@ -70,15 +73,17 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
     }
   }, [preferredViewMode]);
 
-  // Deep-link: abre modal de edição quando ?id= estiver presente
+  // Deep-link: abre modal de visualização por padrão, ou edição quando modal=req:edit
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const id = params.get('id');
+    const modal = params.get('modal');
     const openCreateFlag = params.get('openCreate');
     if (id && requirements.length > 0) {
       const req = requirements.find(r => r.id === id);
       if (req) {
-        openEdit(req);
+        if (modal === 'req:edit') openEdit(req);
+        else { setSelectedReq(req); setShowDetailModal(true); }
       }
     }
     if (openCreateFlag === '1') {
@@ -143,6 +148,16 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
     // Escreve o id na URL para deep-link
     const params = new URLSearchParams(location.search);
     params.set('id', req.id);
+    params.set('modal', 'req:edit');
+    navigate({ pathname: location.pathname, search: params.toString() }, { replace: false });
+  };
+
+  const handleViewDetails = (req: Requirement) => {
+    setSelectedReq(req);
+    setShowDetailModal(true);
+    const params = new URLSearchParams(location.search);
+    params.set('id', req.id);
+    params.set('modal', 'req:view');
     navigate({ pathname: location.pathname, search: params.toString() }, { replace: false });
   };
 
@@ -192,7 +207,7 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
-      </div>
+    </div>
     );
   }
 
@@ -370,7 +385,7 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
           {viewMode === 'cards' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filtered.map(req => (
-                <Card key={req.id} className="hover:shadow-lg transition-all duration-200 border border-border/50 hover:border-brand/50 h-full overflow-hidden flex flex-col">
+                <Card key={req.id} className="border border-border/50 h-full overflow-hidden flex flex-col cursor-pointer card-hover" onClick={() => handleViewDetails(req)}>
                   <CardHeader className="p-4 pb-3">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-2 min-w-0">
@@ -401,7 +416,7 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
                         iconOnly
                         ariaLabel="Editar"
                         icon={Pencil}
-                        onClick={() => openEdit(req)}
+                        onClick={(e) => { e.stopPropagation(); openEdit(req); }}
                         className="h-8 w-8"
                       />)}
                       {hasPermission('can_manage_cases') && (
@@ -412,7 +427,7 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
                         iconOnly
                         ariaLabel="Excluir"
                         icon={Trash2}
-                        onClick={() => remove(req.id)}
+                        onClick={(e) => { e.stopPropagation(); remove(req.id); }}
                         className="h-8 w-8"
                       />)}
                     </div>
@@ -433,7 +448,7 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
               {/* Rows */}
               <div className="divide-y divide-border">
                 {filtered.map((req) => (
-                  <div key={req.id} className="grid grid-cols-[80px_1fr_120px_120px_100px] items-start gap-4 px-4 py-3 hover:bg-muted/30 transition-colors">
+                  <div key={req.id} className="grid grid-cols-[80px_1fr_120px_120px_100px] items-start gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer" onClick={() => handleViewDetails(req)}>
                     {/* ID */}
                     <div className="flex items-center">
                       <span className="text-xs font-mono bg-brand/10 text-brand px-2 py-1 rounded">{`REQ-${(req.id || '').slice(0,4)}`}</span>
@@ -456,7 +471,7 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => openEdit(req)}
+                        onClick={(e) => { e.stopPropagation(); openEdit(req); }}
                         className="h-8 w-8 p-0"
                         title="Editar"
                         aria-label="Editar"
@@ -467,7 +482,7 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => remove(req.id)}
+                        onClick={(e) => { e.stopPropagation(); remove(req.id); }}
                         className="h-8 w-8 p-0"
                         title="Excluir"
                         aria-label="Excluir"
@@ -482,6 +497,23 @@ export const Requirements = ({ embedded = false, preferredViewMode, onPreferredV
           )}
         </>
       )}
+
+      {/* Detail Modal (visualização de Requisito) */}
+      <DetailModal
+        isOpen={showDetailModal}
+        onClose={() => {
+          setShowDetailModal(false);
+          setSelectedReq(null);
+          const params = new URLSearchParams(location.search);
+          params.delete('id');
+          if (params.get('modal') === 'req:view') params.delete('modal');
+          navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
+        }}
+        item={selectedReq}
+        type="requirement"
+        onEdit={openEdit}
+        onDelete={(id) => remove(id)}
+      />
     </div>
   );
 };

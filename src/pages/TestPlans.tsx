@@ -502,6 +502,8 @@ export const TestPlans = () => {
             setSearchParams(params);
           }}
           className="bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0"
+          disabled={!currentProject || currentProject.status !== 'active'}
+          title={!currentProject ? 'Selecione um projeto ativo para criar planos' : (currentProject.status !== 'active' ? 'Projeto não ativo — criação desabilitada' : undefined)}
         >
           <Plus className="h-4 w-4 mr-2" />
           Novo Plano de Teste
@@ -637,7 +639,11 @@ export const TestPlans = () => {
           viewMode === 'cards' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredAndSortedPlans.length > 0 ? paginatedPlans.map((plan) => (
-                <Card key={plan.id} className="hover:shadow-lg transition-all duration-200 border border-border/50 hover:border-brand/50">
+                <Card
+                  key={plan.id}
+                  className="border border-border/50 cursor-pointer card-hover"
+                  onClick={() => handleViewDetails(plan)}
+                >
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-2 min-w-0">
@@ -668,7 +674,7 @@ export const TestPlans = () => {
                       <StandardButton 
                         variant="outline" 
                         size="sm"
-                        onClick={() => handleViewDetails(plan)}
+                        onClick={(e) => { e.stopPropagation(); handleViewDetails(plan); }}
                       >
                         Ver Detalhes
                       </StandardButton>
@@ -745,6 +751,8 @@ export const TestPlans = () => {
                               e.stopPropagation();
                               handleEdit(plan);
                             }}
+                            disabled={!currentProject || currentProject.status !== 'active'}
+                            title={!currentProject ? 'Selecione um projeto ativo para editar planos' : (currentProject.status !== 'active' ? 'Projeto não ativo — edição desabilitada' : undefined)}
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
@@ -788,6 +796,8 @@ export const TestPlans = () => {
                 setSearchParams(params);
               }}
               className="bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0"
+              disabled={!currentProject || currentProject.status !== 'active'}
+              title={!currentProject ? 'Selecione um projeto ativo para criar planos' : (currentProject.status !== 'active' ? 'Projeto não ativo — criação desabilitada' : undefined)}
             >
               <Plus className="h-4 w-4 mr-2" />
               Criar Primeiro Plano

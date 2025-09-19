@@ -16,6 +16,7 @@ import { AIGenerator } from '@/pages/AIGenerator';
 import { History } from '@/pages/History';
 import { Reports } from '@/pages/Reports';
 import { ModelControlPanel } from '@/pages/ModelControlPanel';
+import ProjectAdmin from '@/pages/ProjectAdmin';
 import { UserManagement } from '@/pages/UserManagement';
 import { About } from '@/pages/About';
 import NotFound from '@/pages/NotFound';
@@ -27,7 +28,6 @@ import { Defects } from '@/pages/Defects';
 import { TraceabilityMatrix } from '@/pages/TraceabilityMatrix';
 import { Gestao } from '@/pages/Gestao';
 import './App.css';
-import { Profiles } from '@/pages/Profiles';
 
 const queryClient = new QueryClient();
 
@@ -76,8 +76,8 @@ function AppRouter() {
         <Route path="/history" element={<PermissionGuard><History /></PermissionGuard>} />
         <Route path="/reports" element={<PermissionGuard requiredPermission="can_view_reports"><Reports /></PermissionGuard>} />
         <Route path="/model-control" element={<PermissionGuard requiredRole="admin" redirect="/"><ModelControlPanel /></PermissionGuard>} />
+        <Route path="/project-admin" element={<PermissionGuard requiredPermission="can_manage_projects" redirect="/"><ProjectAdmin /></PermissionGuard>} />
         <Route path="/user-management" element={<PermissionGuard requiredPermission="can_manage_users" redirect="/"><UserManagement /></PermissionGuard>} />
-        <Route path="/profiles" element={<PermissionGuard requiredPermission="can_manage_users" redirect="/"><Profiles /></PermissionGuard>} />
         <Route path="/about" element={<About />} />
         <Route path="*" element={<NotFound />} />
       </Route>

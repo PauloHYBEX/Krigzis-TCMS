@@ -3,13 +3,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/hooks/useAuth';
-import { updateProject, deleteProject } from '@/services/projectService';
+import { usePermissions } from '@/hooks/usePermissions';
+import { updateProject, deleteProjectCascade, getProjectById } from '@/services/projectService';
 import { Project } from '@/types';
-import { Settings, Edit, Trash2, Archive, CheckCircle } from 'lucide-react';
+import { Settings, Trash2, Pause, Play, AlertTriangle } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import {
   AlertDialog,
@@ -24,57 +24,72 @@ import {
 
 interface ProjectManagerProps {
   project: Project;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export const ProjectManager: React.FC<ProjectManagerProps> = ({ project }) => {
+export const ProjectManager: React.FC<ProjectManagerProps> = ({ project, open, onOpenChange }) => {
   const { user } = useAuth();
-  const { refreshProjects, setCurrentProject } = useProject();
+  const { refreshProjects, setCurrentProject, currentProject } = useProject();
   const [showEditForm, setShowEditForm] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showPauseDialog, setShowPauseDialog] = useState(false);
+  const [showArchiveDialog, setShowArchiveDialog] = useState(false);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [formData, setFormData] = useState({
     name: project.name,
-    description: project.description || '',
     color: project.color,
     status: project.status
   });
+  const { isMaster, hasPermission } = usePermissions();
 
-  const handleUpdateProject = async () => {
-    if (!user || !formData.name.trim()) return;
-
+  const persistInline = async (updates: Partial<Project>) => {
+    if (!user) return;
     try {
       setEditing(true);
-      await updateProject(project.id, {
-        name: formData.name.trim(),
-        description: formData.description.trim() || undefined,
-        color: formData.color,
-        status: formData.status
-      });
-
+      await updateProject(project.id, updates as any);
+      const fresh = await getProjectById(project.id);
+      if (fresh) {
+        setFormData((s) => ({ ...s, name: fresh.name, color: fresh.color, status: fresh.status }));
+        if (currentProject?.id === project.id) {
+          setCurrentProject(fresh);
+        }
+      }
       await refreshProjects();
-      setShowEditForm(false);
-
-      toast({
-        title: 'Projeto atualizado',
-        description: `O projeto "${formData.name}" foi atualizado com sucesso.`
-      });
+      toast({ title: 'Projeto atualizado', description: `Alterações salvas.` });
     } catch (error) {
       console.error('Erro ao atualizar projeto:', error);
-      toast({
-        title: 'Erro',
-        description: 'Não foi possível atualizar o projeto. Tente novamente.',
-        variant: 'destructive'
-      });
+      toast({ title: 'Erro', description: (error as any)?.message || 'Falha ao salvar alterações.', variant: 'destructive' });
     } finally {
       setEditing(false);
+    }
+  };
+
+  const handleCancelProject = async () => {
+    if (!hasPermission('can_manage_projects')) {
+      toast({ title: 'Sem permissão', description: 'Você não pode cancelar projetos.', variant: 'destructive' });
+      return;
+    }
+    try {
+      await updateProject(project.id, { status: 'canceled' });
+      const fresh = await getProjectById(project.id);
+      setFormData((s) => ({ ...s, status: 'canceled' }));
+      if (fresh && currentProject?.id === project.id) setCurrentProject(fresh);
+      await refreshProjects();
+      toast({ title: 'Projeto cancelado', description: `O projeto "${project.name}" foi marcado como cancelado.` });
+    } catch (error) {
+      console.error('Erro ao cancelar projeto:', error);
+      toast({ title: 'Erro', description: (error as any)?.message || 'Não foi possível cancelar o projeto.', variant: 'destructive' });
     }
   };
 
   const handleDeleteProject = async () => {
     try {
       setDeleting(true);
-      await deleteProject(project.id);
+      await deleteProjectCascade(project.id);
       await refreshProjects();
       setCurrentProject(null);
 
@@ -94,49 +109,67 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ project }) => {
     }
   };
 
-  const handleArchiveProject = async () => {
+  const handlePauseProject = async () => {
+    if (!hasPermission('can_manage_projects')) {
+      toast({ title: 'Sem permissão', description: 'Você não pode pausar projetos.', variant: 'destructive' });
+      return;
+    }
     try {
-      await updateProject(project.id, { status: 'archived' });
+      await updateProject(project.id, { status: 'paused' });
+      const fresh = await getProjectById(project.id);
+      setFormData((s) => ({ ...s, status: 'paused' }));
+      if (fresh && currentProject?.id === project.id) setCurrentProject(fresh);
       await refreshProjects();
-
-      toast({
-        title: 'Projeto arquivado',
-        description: `O projeto "${project.name}" foi arquivado com sucesso.`
-      });
+      toast({ title: 'Projeto pausado', description: `O projeto "${project.name}" está em modo somente leitura.` });
     } catch (error) {
-      console.error('Erro ao arquivar projeto:', error);
-      toast({
-        title: 'Erro',
-        description: 'Não foi possível arquivar o projeto. Tente novamente.',
-        variant: 'destructive'
-      });
+      console.error('Erro ao pausar projeto:', error);
+      toast({ title: 'Erro', description: (error as any)?.message || 'Não foi possível pausar o projeto.', variant: 'destructive' });
     }
   };
 
-  const handleRestoreProject = async () => {
+  const handleResumeProject = async () => {
+    if (!hasPermission('can_manage_projects')) {
+      toast({ title: 'Sem permissão', description: 'Você não pode retomar projetos.', variant: 'destructive' });
+      return;
+    }
     try {
       await updateProject(project.id, { status: 'active' });
+      const fresh = await getProjectById(project.id);
+      setFormData((s) => ({ ...s, status: 'active' }));
+      if (fresh && currentProject?.id === project.id) setCurrentProject(fresh);
       await refreshProjects();
-
-      toast({
-        title: 'Projeto restaurado',
-        description: `O projeto "${project.name}" foi restaurado com sucesso.`
-      });
+      toast({ title: 'Projeto retomado', description: `O projeto "${project.name}" voltou ao modo ativo.` });
     } catch (error) {
-      console.error('Erro ao restaurar projeto:', error);
-      toast({
-        title: 'Erro',
-        description: 'Não foi possível restaurar o projeto. Tente novamente.',
-        variant: 'destructive'
-      });
+      console.error('Erro ao retomar projeto:', error);
+      toast({ title: 'Erro', description: (error as any)?.message || 'Não foi possível retomar o projeto.', variant: 'destructive' });
+    }
+  };
+
+  const handleArchiveProject = async () => {
+    if (!hasPermission('can_manage_projects')) {
+      toast({ title: 'Sem permissão', description: 'Você não pode arquivar projetos.', variant: 'destructive' });
+      return;
+    }
+    try {
+      await updateProject(project.id, { status: 'archived' });
+      const fresh = await getProjectById(project.id);
+      setFormData((s) => ({ ...s, status: 'archived' }));
+      if (fresh && currentProject?.id === project.id) setCurrentProject(fresh);
+      await refreshProjects();
+      toast({ title: 'Projeto arquivado', description: `O projeto "${project.name}" foi arquivado.` });
+    } catch (error) {
+      console.error('Erro ao arquivar projeto:', error);
+      toast({ title: 'Erro', description: (error as any)?.message || 'Não foi possível arquivar o projeto.', variant: 'destructive' });
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'active': return 'bg-green-50 text-green-700 border-green-200';
+      case 'paused': return 'bg-yellow-50 text-yellow-700 border-yellow-200';
       case 'completed': return 'bg-blue-50 text-blue-700 border-blue-200';
       case 'archived': return 'bg-gray-50 text-gray-700 border-gray-200';
+      case 'canceled': return 'bg-red-50 text-red-700 border-red-200';
       default: return 'bg-gray-50 text-gray-700 border-gray-200';
     }
   };
@@ -144,23 +177,29 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ project }) => {
   const getStatusLabel = (status: string) => {
     switch (status) {
       case 'active': return 'Ativo';
+      case 'paused': return 'Pausado';
       case 'completed': return 'Concluído';
       case 'archived': return 'Arquivado';
+      case 'canceled': return 'Cancelado';
       default: return status;
     }
   };
 
+  const controlled = typeof open === 'boolean' && typeof onOpenChange === 'function';
+
   return (
     <>
-      <Dialog open={showEditForm} onOpenChange={setShowEditForm}>
-        <DialogTrigger asChild>
-          <Button variant="ghost" size="sm">
-            <Settings className="h-4 w-4" />
-          </Button>
-        </DialogTrigger>
-        <DialogContent className="max-w-md border-brand/20 shadow-2xl">
+      <Dialog open={controlled ? open : showEditForm} onOpenChange={controlled ? onOpenChange! : setShowEditForm}>
+        {!controlled && (
+          <DialogTrigger asChild>
+            <Button variant="ghost" size="sm">
+              <Settings className="h-4 w-4" />
+            </Button>
+          </DialogTrigger>
+        )}
+        <DialogContent className="max-w-md border-0 shadow-lg">
           <DialogHeader>
-            <DialogTitle className="text-brand text-xl font-semibold">
+            <DialogTitle className="text-xl font-semibold">
               Gerenciar Projeto
             </DialogTitle>
           </DialogHeader>
@@ -172,18 +211,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ project }) => {
                 id="project-name"
                 value={formData.name}
                 onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                className="focus:border-brand/50 focus:ring-brand/20"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="project-description">Descrição</Label>
-              <Textarea
-                id="project-description"
-                value={formData.description}
-                onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                rows={3}
-                className="focus:border-brand/50 focus:ring-brand/20"
+                onBlur={() => formData.name !== project.name ? persistInline({ name: formData.name.trim() }) : undefined}
+                className=""
               />
             </div>
 
@@ -195,7 +224,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ project }) => {
                   type="color"
                   value={formData.color}
                   onChange={(e) => setFormData(prev => ({ ...prev, color: e.target.value }))}
-                  className="w-12 h-10 rounded border border-brand/30 cursor-pointer focus:border-brand"
+                  onBlur={() => formData.color !== project.color ? persistInline({ color: formData.color }) : undefined}
+                  className="w-12 h-10 rounded border cursor-pointer"
                 />
                 <span className="text-sm text-muted-foreground">{formData.color}</span>
               </div>
@@ -204,61 +234,44 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ project }) => {
             <div>
               <Label>Status Atual</Label>
               <div className="flex items-center gap-2 mt-1">
-                <Badge variant="outline" className={getStatusColor(project.status)}>
-                  {getStatusLabel(project.status)}
+                <Badge variant="outline" className={getStatusColor(formData.status)}>
+                  {getStatusLabel(formData.status)}
                 </Badge>
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2 pt-4">
-              {project.status === 'active' ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleArchiveProject}
-                  className="flex-1 border-orange-200 text-orange-700 hover:bg-orange-50"
-                >
-                  <Archive className="h-4 w-4 mr-2" />
-                  Arquivar
+            <div className="flex flex-wrap gap-2 pt-2">
+              {formData.status === 'active' ? (
+                <Button type="button" onClick={() => setShowPauseDialog(true)} className="flex-1 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0">
+                  <Pause className="h-4 w-4 mr-2" /> Pausar
+                </Button>
+              ) : formData.status === 'archived' ? (
+                <Button type="button" onClick={handleResumeProject} className="flex-1 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0">
+                  <Play className="h-4 w-4 mr-2" /> Ativar
                 </Button>
               ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleRestoreProject}
-                  className="flex-1 border-green-200 text-green-700 hover:bg-green-50"
-                >
-                  <CheckCircle className="h-4 w-4 mr-2" />
-                  Restaurar
+                <Button type="button" onClick={handleResumeProject} className="flex-1 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0">
+                  <Play className="h-4 w-4 mr-2" /> Retomar
                 </Button>
               )}
 
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setShowDeleteDialog(true)}
-                className="flex-1 border-red-200 text-red-700 hover:bg-red-50"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Excluir
-              </Button>
-            </div>
+              {formData.status !== 'archived' && (
+                <Button type="button" onClick={() => setShowArchiveDialog(true)} className="flex-1 bg-gradient-to-r from-gray-500 to-gray-600 hover:from-gray-600 hover:to-gray-700 text-white border-0">
+                  Arquivar
+                </Button>
+              )}
 
-            <div className="flex justify-end gap-2 pt-4 border-t">
-              <Button
-                variant="outline"
-                onClick={() => setShowEditForm(false)}
-                disabled={editing}
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleUpdateProject}
-                disabled={editing || !formData.name.trim()}
-                className="bg-brand hover:bg-brand/90 text-white"
-              >
-                {editing ? 'Salvando...' : 'Salvar'}
-              </Button>
+              {formData.status !== 'canceled' && (
+                <Button type="button" onClick={() => setShowCancelDialog(true)} className="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white border-0">
+                  Cancelar Projeto
+                </Button>
+              )}
+
+              {(isMaster() || hasPermission('can_delete_projects')) && (
+                <Button type="button" onClick={() => setShowDeleteDialog(true)} className="flex-1 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white">
+                  <Trash2 className="h-4 w-4 mr-2" /> Excluir
+                </Button>
+              )}
             </div>
           </div>
         </DialogContent>
@@ -267,20 +280,75 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ project }) => {
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir Projeto</AlertDialogTitle>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" /> Excluir Projeto (apenas Master)
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Tem certeza que deseja excluir o projeto "{project.name}"? Esta ação não pode ser desfeita e todos os dados relacionados serão perdidos.
+              Esta ação é irreversível. Todos os dados vinculados ao projeto serão removidos: Planos, Casos, Execuções, Defeitos e vínculos de Requisitos.
+              <br />
+              Para confirmar, digite exatamente o nome do projeto abaixo: <strong>{project.name}</strong>
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="mt-2">
+            <Input placeholder={project.name} value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteProject}
-              disabled={deleting}
+              disabled={deleting || confirmText !== project.name || !isMaster()}
               className="bg-red-600 hover:bg-red-700"
             >
-              {deleting ? 'Excluindo...' : 'Excluir'}
+              {deleting ? 'Excluindo...' : 'Excluir Tudo'}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmação de Pausa */}
+      <AlertDialog open={showPauseDialog} onOpenChange={setShowPauseDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Pausar projeto?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Ao pausar, o projeto fica em modo somente leitura. Criação de Planos, Casos e Execuções será desabilitada enquanto estiver pausado.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction className="bg-teal-600 hover:bg-teal-700" onClick={handlePauseProject}>Confirmar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmação de Arquivamento */}
+      <AlertDialog open={showArchiveDialog} onOpenChange={setShowArchiveDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Arquivar projeto?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Arquivar oculta o projeto do uso diário. Dados permanecem preservados, mas o projeto não aparecerá por padrão. Você pode reativá-lo depois.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction className="bg-gray-600 hover:bg-gray-700" onClick={handleArchiveProject}>Arquivar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmação de Cancelamento */}
+      <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancelar projeto?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Cancelar indica que o projeto foi interrompido. Dados permanecem salvos, porém o projeto não aparecerá por padrão e não permitirá novas criações.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <AlertDialogAction className="bg-amber-600 hover:bg-amber-700" onClick={handleCancelProject}>Confirmar cancelamento</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -30,7 +30,7 @@ export function useStatusOptions(projectId?: string | null) {
           return;
         }
       }
-    } catch {}
+    } catch (e) { /* noop: fallback para DEFAULT_STATUS logo abaixo */ }
     setOptions(DEFAULT_STATUS);
   }, [projectId]);
 
@@ -38,7 +38,7 @@ export function useStatusOptions(projectId?: string | null) {
     setOptions(next);
     try {
       localStorage.setItem(storageKey(projectId), JSON.stringify(next));
-    } catch {}
+    } catch (e) { /* noop: se falhar storage, mantém apenas em memória */ }
   }, [projectId]);
 
   const addStatus = useCallback((opt: StatusOption) => {

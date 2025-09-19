@@ -23,6 +23,8 @@ export default tseslint.config(
         "warn",
         { allowConstantExport: true },
       ],
+      // Temporário: reduzir severidade enquanto migramos a tipagem aos poucos
+      "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-unused-vars": "off",
       // Desabilita a regra que está causando erro de carregamento com ESLint 9 + TS-ESlint 8
       // (Cannot read properties of undefined (reading 'allowShortCircuit'))

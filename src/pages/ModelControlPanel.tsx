@@ -1274,7 +1274,8 @@ export const ModelControlPanel = () => {
                             const re = new RegExp(`\\{{${p}\\}}`, 'g');
                             out = out.replace(re, `<${p}>`);
                           });
-                        } catch {}
+                        } catch (e) { void e; }
+
                         return out;
                       })()}
                     </div>

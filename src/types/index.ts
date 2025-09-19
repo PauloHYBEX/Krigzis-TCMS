@@ -82,6 +82,7 @@ export interface Requirement {
 export interface Defect {
   id: string;
   user_id: string;
+  project_id?: string; // incluído para compatibilidade com createDefect e filtros por projeto
   title: string;
   description: string;
   status: 'open' | 'in_analysis' | 'fixed' | 'validated' | 'closed';
@@ -156,7 +157,7 @@ export interface Project {
   name: string;
   slug: string;
   description?: string;
-  status: 'active' | 'archived' | 'completed';
+  status: 'active' | 'paused' | 'archived' | 'completed' | 'canceled';
   color: string;
   user_id: string;
   created_at: Date;

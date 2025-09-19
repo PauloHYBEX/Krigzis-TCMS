@@ -1,15 +1,17 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Project } from '@/types';
-import { getActiveProjects, getProjectById } from '@/services/projectService';
+import { getActiveProjects, getArchivedOrCompletedProjects, getProjectById } from '@/services/projectService';
 import { useAuth } from '@/hooks/useAuth';
 import { useQueryClient } from '@tanstack/react-query';
 
 interface ProjectContextType {
   currentProject: Project | null;
   projects: Project[];
+  archivedProjects: Project[];
   loading: boolean;
   setCurrentProject: (project: Project | null) => void;
   refreshProjects: () => Promise<void>;
+  refreshArchivedProjects: () => Promise<void>;
 }
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
@@ -31,6 +33,7 @@ export const ProjectProvider: React.FC<ProjectProviderProps> = ({ children }) =>
   const queryClient = useQueryClient();
   const [currentProject, setCurrentProjectState] = useState<Project | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [archivedProjects, setArchivedProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
 
   const broadcastProjectChange = (project: Project | null) => {
@@ -43,7 +46,17 @@ export const ProjectProvider: React.FC<ProjectProviderProps> = ({ children }) =>
       }
       // Invalida e refaz fetch das queries ativas ao trocar de projeto
       queryClient.invalidateQueries({ predicate: () => true, refetchType: 'active' });
-    } catch {}
+    } catch (e) { /* noop */ }
+  };
+
+  const refreshArchivedProjects = async () => {
+    try {
+      const list = await getArchivedOrCompletedProjects();
+      setArchivedProjects(list);
+    } catch (e) {
+      console.warn('Falha ao carregar projetos arquivados:', e);
+      setArchivedProjects([]);
+    }
   };
 
   // Chave para localStorage
@@ -122,9 +135,11 @@ export const ProjectProvider: React.FC<ProjectProviderProps> = ({ children }) =>
   const value: ProjectContextType = {
     currentProject,
     projects,
+    archivedProjects,
     loading,
     setCurrentProject,
-    refreshProjects
+    refreshProjects,
+    refreshArchivedProjects
   };
 
   return (
