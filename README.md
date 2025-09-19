@@ -4,7 +4,7 @@
 
 **Krigzis-TCMS** é um sistema de gestão de casos de teste (Test Case Management System) com funcionalidades avançadas de IA. Plataforma moderna construída com React, TypeScript, Supabase e integração multi-provedor de IA (Gemini, OpenAI, Anthropic, Groq, Ollama).
 
-![Visão geral do Krigzis-TCMS](docs/assets/screenshot.png.png)
+![Visão geral do Krigzis-TCMS](docs/assets/Screenshot_1.png)
 
 ### Funcionalidades Principais
 
