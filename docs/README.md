@@ -1,41 +1,15 @@
 # Documentação do Projeto
 
-Este diretório consolida toda a documentação do sistema organizada por tópicos.
+Este diretório contém a documentação consolidada oficial.
 
-## Índice por Tópicos
+## Documentos
 
-- 00-visao-geral
-  - RESUMO_EXECUTIVO.md
-- 01-configuracao
-  - RESUMO_CONFIGURACAO.md
-  - CONFIGURACAO_SUPABASE.md
-- 02-banco-dados
-  - database-setup.sql
-  - database-setup-clean.sql
-  - database_setup.sql
-  - SQL_CORRIGIDO_SUPABASE.sql
-  - SQL_FINAL_CORRIGIDO.sql
-  - SQL_LIMPO_FINAL.sql
-  - SUPABASE_CASCADE_FIX.sql
-  - CORRECAO_FINAL_ORGANIZACOES.sql
-  - CORRECAO_RLS_ORGANIZACOES.sql
-- 03-diagnosticos-correcoes
-  - DIAGNOSTICO_DETALHADO_ERROS.md
-  - INSTRUCOES_CORRECAO.md
-  - INSTRUCOES_CORRECAO_ATUALIZADAS.md
-  - RESUMO_CORRECOES.md
-- 04-planos-qualidade
-  - PLANO_ACAO_COMPLETO.md
-  - QUALITY_IMPROVEMENT_PLAN.md
-- 05-ia-implementacoes
-  - ANALISE_COMPLETA_TESTMASTER_AI.md
-  - IMPLEMENTACAO_MULTIPLOS_MODELOS_GEMINI.md
-  - IMPLEMENTACAO_PERMISSOES_MODELOS_IA.md
-- 99-historico
-  - HISTORICO_GERAL.md
-- anexos-ou-temp
-  - IMPLEMENTACAO_ATUAL_TEMP.md
+- 01-Guia-do-Sistema.md
+  - Visão, arquitetura, módulos, permissões, IA (MCP) e APIs.
+- 02-SQL-e-Banco-de-Dados.md
+  - Setup Supabase, RLS, catálogo de scripts e troubleshooting.
+- 03-Historico-e-Planos.md
+  - Histórico do projeto, diagnósticos, plano de ação e lições aprendidas.
 
 ## Observações
-- O README da raiz permanece como ponto de entrada. Consulte aqui para encontrar documentação detalhada por área.
-- Scripts SQL foram agrupados em `02-banco-dados` para facilitar execução e revisão.
+- O README da raiz aponta para estes 3 documentos consolidado(s).

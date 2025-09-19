@@ -39,7 +39,7 @@ export const StandardButton = forwardRef<HTMLButtonElement, StandardButtonProps>
   const computedAriaLabel = ariaLabel || (typeof children === 'string' ? children : undefined);
   const baseAnim = 'transition-all duration-200 ease-out hover:-translate-y-[1px] active:translate-y-0 active:scale-[0.99]';
   const brandClasses = variant === 'brand'
-    ? 'bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]'
+    ? 'bg-gradient-to-r from-[hsl(var(--brand))] to-[hsl(var(--brand-hover))] hover:from-[hsl(var(--brand-hover))] hover:to-[hsl(var(--brand))] text-[hsl(var(--brand-foreground))] border-0 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]'
     : '';
   const iconSizing = iconOnly ? 'h-8 w-8 p-0' : '';
 

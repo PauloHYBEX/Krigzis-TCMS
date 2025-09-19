@@ -96,7 +96,7 @@ export const TestCaseForm = ({ onSuccess, onCancel, planId, initialData }: TestC
 
       if (!hasMeaningfulFormData && !hasMeaningfulSteps) {
         // Rascunho vazio: remove para não sujar futuras aberturas
-        try { localStorage.removeItem(getDraftKey()); } catch {}
+        try { localStorage.removeItem(getDraftKey()); } catch (e) { /* noop */ }
         return;
       }
 
@@ -136,6 +136,7 @@ export const TestCaseForm = ({ onSuccess, onCancel, planId, initialData }: TestC
       localStorage.setItem(getDraftKey(), payload);
     } catch (e) {
       // ignore quota errors
+      /* noop */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData, steps, initialData?.id]);
@@ -180,7 +181,7 @@ export const TestCaseForm = ({ onSuccess, onCancel, planId, initialData }: TestC
       });
 
       // Clear draft on success
-      try { localStorage.removeItem(getDraftKey()); } catch {}
+      try { localStorage.removeItem(getDraftKey()); } catch (e) { /* noop */ }
 
       onSuccess?.(testCase);
     } catch (error) {
@@ -196,7 +197,7 @@ export const TestCaseForm = ({ onSuccess, onCancel, planId, initialData }: TestC
   };
 
   const handleCancel = () => {
-    try { localStorage.removeItem(getDraftKey()); } catch {}
+    try { localStorage.removeItem(getDraftKey()); } catch (e) { /* noop */ }
     onCancel?.();
   };
 

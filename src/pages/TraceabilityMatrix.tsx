@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
-import { Requirement, TestCase } from '@/types';
+import { Requirement, TestCase, TestExecution } from '@/types';
+
 import {
   getRequirements,
   getRequirementsByProject,
@@ -12,8 +13,13 @@ import {
   unlinkRequirementFromCase,
   getDefects,
   getDefectsByProject,
+  getTestExecutions,
+  getTestExecutionsByProject,
+  deleteRequirement,
 } from '@/services/supabaseService';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { DetailModal } from '@/components/DetailModal';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { StandardButton } from '@/components/StandardButton';
 import { Badge } from '@/components/ui/badge';
@@ -43,11 +49,14 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
   const [allCases, setAllCases] = useState<TestCase[]>([]);
   const [linkedByReq, setLinkedByReq] = useState<Record<string, string[]>>({});
   const [defectsByReq, setDefectsByReq] = useState<Record<string, { openCount: number; maxSeverity: 'low'|'medium'|'high'|'critical'|null }>>({});
+  const [unassignedSummary, setUnassignedSummary] = useState<{ caseIds: string[]; openCount: number; maxSeverity: 'low'|'medium'|'high'|'critical'|null }>({ caseIds: [], openCount: 0, maxSeverity: null });
   const [loading, setLoading] = useState(true);
   const [manageReqId, setManageReqId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [availableQuery, setAvailableQuery] = useState('');
   const [linkedQuery, setLinkedQuery] = useState('');
+  const [selectedReq, setSelectedReq] = useState<Requirement | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
   const [viewMode, setViewMode] = useState<'cards' | 'list'>(() => {
     if (preferredViewMode) return preferredViewMode;
     const saved = localStorage.getItem('traceability_viewMode');
@@ -75,11 +84,27 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
   const bootstrap = async () => {
     try {
       setLoading(true);
-      const [reqs, cases, defects] = await Promise.all([
+      const [reqs, cases, defectsProj, defectsAll, execProj, execAll] = await Promise.all([
         currentProject?.id ? getRequirementsByProject(user!.id, currentProject.id) : getRequirements(user!.id),
         currentProject?.id ? getTestCasesByProject(user!.id, currentProject.id) : getTestCases(user!.id),
-        currentProject?.id ? getDefectsByProject(user!.id, currentProject.id) : getDefects(user!.id),
+        currentProject?.id ? getDefectsByProject(user!.id, currentProject.id) : Promise.resolve([]),
+        getDefects(user!.id),
+        currentProject?.id ? getTestExecutionsByProject(user!.id, currentProject.id) : Promise.resolve([]),
+        getTestExecutions(user!.id),
       ]);
+
+      // Deduplicar por id
+      const defectsMap = new Map<string, any>();
+      [...(defectsProj as any[]), ...(defectsAll as any[])].forEach((d: any) => {
+        if (d?.id && !defectsMap.has(d.id)) defectsMap.set(d.id, d);
+      });
+      const defects = Array.from(defectsMap.values());
+
+      const execMap = new Map<string, any>();
+      [...(execProj as any[]), ...(execAll as any[])].forEach((e: any) => {
+        if (e?.id && !execMap.has(e.id)) execMap.set(e.id, e);
+      });
+      const executions = Array.from(execMap.values());
       setRequirements(reqs);
       setAllCases(cases);
 
@@ -98,15 +123,22 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
       }
       setLinkedByReq(map);
 
-      // Calcular defeitos abertos por requisito (baseado nos cases vinculados)
+      // Mapear execucao -> case para suportar defeitos criados apenas com execution_id
+      const execToCase = new Map<string, string | null>();
+      (executions as TestExecution[]).forEach(ex => {
+        execToCase.set((ex as any).id, (ex as any).case_id || null);
+      });
+
+      // Calcular defeitos abertos por requisito (baseado nos cases vinculados ou derivados da execução)
       const rank: Record<'low'|'medium'|'high'|'critical', number> = { low: 1, medium: 2, high: 3, critical: 4 };
       const dMap: Record<string, { openCount: number; maxSeverity: 'low'|'medium'|'high'|'critical'|null }> = {};
       for (const r of reqs) {
         const caseSet = new Set(map[r.id] || []);
         let openCount = 0;
         let maxSeverity: 'low'|'medium'|'high'|'critical'|null = null;
-        for (const d of defects) {
-          if (d.case_id && caseSet.has(d.case_id) && d.status !== 'closed') {
+        for (const d of defects as any[]) {
+          const derivedCaseId = d.case_id || (d.execution_id ? execToCase.get(d.execution_id) || undefined : undefined);
+          if (derivedCaseId && caseSet.has(derivedCaseId) && d.status !== 'closed') {
             openCount += 1;
             if (!maxSeverity || rank[d.severity as 'low'|'medium'|'high'|'critical'] > rank[maxSeverity]) {
               maxSeverity = d.severity as 'low'|'medium'|'high'|'critical';
@@ -116,6 +148,24 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
         dMap[r.id] = { openCount, maxSeverity };
       }
       setDefectsByReq(dMap);
+
+      // Resumo "Sem Requisito": casos sem vínculo e defeitos associados
+      const linkedCaseIds = new Set<string>();
+      Object.values(map).forEach(arr => arr.forEach(id => linkedCaseIds.add(id)));
+      const unassignedIds = (cases || []).map(c => c.id).filter(id => !linkedCaseIds.has(id));
+
+      let unOpen = 0;
+      let unMax: 'low'|'medium'|'high'|'critical'|null = null;
+      for (const d of defects) {
+        const derivedCaseId = d.case_id || (d.execution_id ? execToCase.get(d.execution_id) || undefined : undefined);
+        if (derivedCaseId && unassignedIds.includes(derivedCaseId) && d.status !== 'closed') {
+          unOpen += 1;
+          if (!unMax || rank[d.severity as 'low'|'medium'|'high'|'critical'] > rank[unMax]) {
+            unMax = d.severity as 'low'|'medium'|'high'|'critical';
+          }
+        }
+      }
+      setUnassignedSummary({ caseIds: unassignedIds, openCount: unOpen, maxSeverity: unMax });
     } catch (e: any) {
       toast({ title: 'Erro', description: e.message || 'Falha ao carregar matriz', variant: 'destructive' });
     } finally {
@@ -202,7 +252,25 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
-      </div>
+        {/* Detail Modal (visualização de requisito) */}
+      <DetailModal
+        isOpen={showDetailModal}
+        onClose={() => { setShowDetailModal(false); setSelectedReq(null); }}
+        item={selectedReq}
+        type="requirement"
+        onEdit={(item) => { if (item?.id) { openManage(item.id); setShowDetailModal(false); } }}
+        onDelete={async (id) => {
+          try {
+            await deleteRequirement(id);
+            setRequirements(prev => prev.filter(r => r.id !== id));
+            setShowDetailModal(false);
+            toast({ title: 'Excluído', description: 'Requisito excluído.' });
+          } catch (e: any) {
+            toast({ title: 'Erro', description: e?.message || 'Falha ao excluir requisito', variant: 'destructive' });
+          }
+        }}
+      />
+    </div>
     );
   }
 
@@ -245,7 +313,11 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
                 const linkedCount = (linkedByReq[req.id] || []).filter(id => allCases.some(c => c.id === id)).length;
                 const dInfo = defectsByReq[req.id] || { openCount: 0, maxSeverity: null };
                 return (
-                  <Card key={req.id} className="h-full flex flex-col border border-border/50 hover:border-brand/50 hover:shadow-lg transition-all duration-200 overflow-hidden">
+                  <Card
+                    key={req.id}
+                    className="h-full flex flex-col border border-border/50 cursor-pointer card-hover overflow-hidden"
+                    onClick={() => { setSelectedReq(req); setShowDetailModal(true); }}
+                  >
                     <CardHeader className="p-4 pb-3">
                       <div className="flex items-start justify-between">
                         <div className="flex items-center gap-2 min-w-0">
@@ -262,50 +334,41 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
                         </div>
                       </div>
                       <div className="text-sm text-muted-foreground mb-2 line-clamp-2">{req.description}</div>
-                      <div className="mt-auto flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                      <div className="mt-auto flex items-center justify-end gap-2">
+                        <span
+                          onClick={(e) => { e.stopPropagation(); if (hasPermission('can_manage_cases')) openManage(req.id); else toast({ title: 'Sem permissão', description: 'Você não pode gerenciar vínculos.', variant: 'destructive' }); }}
+                          className="inline-flex"
+                        >
                           <InfoPill
                             icon={LinkIcon}
                             value={linkedCount}
-                            title="Casos vinculados ao requisito"
+                            title={hasPermission('can_manage_cases') ? 'Gerenciar vínculos' : 'Sem permissão para gerenciar'}
+                            className="h-5 w-[40px] px-1.5 text-[11px]"
+                            ariaLabel="Gerenciar vínculos"
                           />
+                        </span>
+                        <span
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const caseIds = linkedByReq[req.id] || [];
+                            if (dInfo.openCount > 0 && caseIds.length) {
+                              navigate(`/management?tab=defects&cases=${caseIds.join(',')}`);
+                            } else {
+                              toast({ title: 'Sem defeitos', description: 'Nenhum defeito aberto para este requisito. Abrindo a tela de Defeitos.', variant: 'default' });
+                              navigate('/management?tab=defects');
+                            }
+                          }}
+                          className="inline-flex"
+                        >
                           <InfoPill
                             icon={BugIcon}
                             value={dInfo.openCount}
-                            title={dInfo.openCount > 0 ? `Defeitos abertos • severidade: ${severityLabel(dInfo.maxSeverity!)}` : 'Nenhum defeito aberto para os casos vinculados'}
+                            title={dInfo.openCount > 0 ? `Ver defeitos • severidade: ${severityLabel(dInfo.maxSeverity!)}` : 'Nenhum defeito aberto'}
                             variant={dInfo.openCount > 0 ? 'attention' : 'default'}
+                            className="h-5 w-[40px] px-1.5 text-[11px]"
+                            ariaLabel="Ver defeitos do requisito"
                           />
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {linkedCount > 0 && (
-                            <StandardButton
-                              variant="outline"
-                              size="sm"
-                              icon={ExternalLink}
-                              iconOnly
-                              ariaLabel="Ver defeitos"
-                              onClick={() => {
-                                const caseIds = linkedByReq[req.id] || [];
-                                if (caseIds.length) {
-                                  navigate(`/management?tab=defects&cases=${caseIds.join(',')}`);
-                                }
-                              }}
-                              className="h-8 w-8 rounded-full"
-                              title="Ver defeitos deste requisito (filtrados pelos casos vinculados)"
-                            />
-                          )}
-                          {hasPermission('can_manage_cases') && (
-                            <StandardButton
-                              variant="brand"
-                              size="sm"
-                              icon={Cog}
-                              iconOnly
-                              ariaLabel="Gerenciar vínculos"
-                              className="h-8 w-8 rounded-full"
-                              onClick={() => openManage(req.id)}
-                            />
-                          )}
-                        </div>
+                        </span>
                       </div>
                     </CardContent>
                   </Card>
@@ -315,12 +378,12 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
           ) : (
             <div className="bg-card border border-border rounded-lg overflow-hidden">
               {/* Header */}
-              <div className="grid grid-cols-[80px_1fr_120px_120px_220px] items-start gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              <div className="grid grid-cols-[80px_1fr_120px_120px_100px] items-center gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 <div className="pt-px">ID</div>
                 <div className="text-center pt-px">Título</div>
                 <div className="text-center pt-px">Prioridade</div>
                 <div className="text-center pt-px">Status</div>
-                <div className="flex justify-end">Vínculos / Ações</div>
+                <div className="flex justify-center">Vínculos / Ações</div>
               </div>
               {/* Rows */}
               <div className="divide-y divide-border">
@@ -328,55 +391,91 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
                 const linkedCount = (linkedByReq[req.id] || []).length;
                 const dInfo = defectsByReq[req.id] || { openCount: 0, maxSeverity: null };
                 return (
-                  <div key={req.id} className="grid grid-cols-[80px_1fr_120px_120px_220px] items-start gap-4 px-4 py-3 hover:bg-muted/30 transition-colors min-h-[56px]">
+                  <div
+                    key={req.id}
+                    className="grid grid-cols-[80px_1fr_120px_120px_100px] items-center gap-4 px-4 py-3 hover:bg-muted/30 transition-colors min-h-[56px] cursor-pointer"
+                    onClick={() => { setSelectedReq(req); setShowDetailModal(true); }}
+                  >
                     <div className="flex items-center"><span className="text-xs font-mono bg-brand/10 text-brand px-2 py-1 rounded">{`REQ-${(req.id || '').slice(0,4)}`}</span></div>
                     <div className="text-sm font-medium leading-tight text-center flex items-center justify-center min-w-0"><span className="truncate">{req.title}</span></div>
                     <div className="flex items-center justify-center"><Badge className={priorityBadgeClass(req.priority)}>{priorityLabel(req.priority)}</Badge></div>
                     <div className="flex items-center justify-center"><Badge className={requirementStatusBadgeClass(req.status)}>{requirementStatusLabel(req.status)}</Badge></div>
-                    <div className="flex items-center justify-end gap-2">
-                      <InfoPill
-                        icon={LinkIcon}
-                        value={linkedCount}
-                        title="Casos vinculados ao requisito"
-                      />
-                      <InfoPill
-                        icon={BugIcon}
-                        value={dInfo.openCount}
-                        title={dInfo.openCount > 0 ? `Defeitos abertos • severidade: ${severityLabel(dInfo.maxSeverity!)}` : 'Nenhum defeito aberto para os casos vinculados'}
-                        variant={dInfo.openCount > 0 ? 'attention' : 'default'}
-                      />
-                      {linkedCount > 0 && (
-                        <StandardButton
-                          variant="outline"
-                          size="sm"
-                          icon={ExternalLink}
-                          iconOnly
-                          ariaLabel="Ver defeitos"
-                          onClick={() => {
-                            const caseIds = linkedByReq[req.id] || [];
-                            if (caseIds.length) {
-                              navigate(`/management?tab=defects&cases=${caseIds.join(',')}`);
-                            }
-                          }}
-                          className="h-8 w-8 p-0 rounded-full"
-                          title="Ver defeitos deste requisito (filtrados pelos casos vinculados)"
-                        />
-                      )}
-                      {hasPermission('can_manage_cases') && (
-                        <StandardButton
-                          variant="brand"
-                          size="sm"
-                          icon={Cog}
-                          iconOnly
+                    <div className="grid grid-cols-[40px_40px] items-center justify-center justify-items-center gap-2">
+                      <span
+                        onClick={(e) => { e.stopPropagation(); if (hasPermission('can_manage_cases')) openManage(req.id); else toast({ title: 'Sem permissão', description: 'Você não pode gerenciar vínculos.', variant: 'destructive' }); }}
+                        className="inline-flex"
+                      >
+                        <InfoPill
+                          icon={LinkIcon}
+                          value={linkedCount}
+                          title={hasPermission('can_manage_cases') ? 'Gerenciar vínculos' : 'Sem permissão para gerenciar'}
+                          className="h-5 w-[40px] px-1.5 text-[11px]"
                           ariaLabel="Gerenciar vínculos"
-                          onClick={() => openManage(req.id)}
-                          className="h-8 w-8 p-0 rounded-full"
                         />
-                      )}
+                      </span>
+                      <span
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const caseIds = linkedByReq[req.id] || [];
+                          if (dInfo.openCount > 0 && caseIds.length) {
+                            navigate(`/management?tab=defects&cases=${caseIds.join(',')}`);
+                          } else {
+                            toast({ title: 'Sem defeitos', description: 'Nenhum defeito aberto para este requisito. Abrindo a tela de Defeitos.', variant: 'default' });
+                            navigate('/management?tab=defects');
+                          }
+                        }}
+                        className="inline-flex"
+                      >
+                        <InfoPill
+                          icon={BugIcon}
+                          value={dInfo.openCount}
+                          title={dInfo.openCount > 0 ? `Ver defeitos • severidade: ${severityLabel(dInfo.maxSeverity!)}` : 'Nenhum defeito aberto'}
+                          variant={dInfo.openCount > 0 ? 'attention' : 'default'}
+                          className="h-5 w-[40px] px-1.5 text-[11px]"
+                          ariaLabel="Ver defeitos do requisito"
+                        />
+                      </span>
                     </div>
                   </div>
                 );
               })}
+              {/* Linha extra: Casos sem requisito */}
+              {(unassignedSummary.caseIds.length > 0 || unassignedSummary.openCount > 0) && (
+                <div className="grid grid-cols-[80px_1fr_120px_120px_100px] items-center gap-4 px-4 py-3 bg-muted/30">
+                  <div className="flex items-center text-xs text-muted-foreground">—</div>
+                  <div className="text-sm font-medium leading-tight text-center flex items-center justify-center min-w-0"><span className="truncate">Sem Requisito</span></div>
+                  <div className="flex items-center justify-center text-xs text-muted-foreground">—</div>
+                  <div className="flex items-center justify-center text-xs text-muted-foreground">—</div>
+                  <div className="flex items-center justify-center gap-2">
+                    <InfoPill
+                      icon={LinkIcon}
+                      value={unassignedSummary.caseIds.length}
+                      title="Casos sem requisito"
+                      className="h-5 w-[40px] px-1.5 text-[11px]"
+                      onClick={() => {
+                        toast({ title: 'Casos sem requisito', description: 'Abra um requisito e use Gerenciar vínculos para associar casos.', variant: 'default' });
+                      }}
+                      ariaLabel="Casos sem requisito"
+                    />
+                    <InfoPill
+                      icon={BugIcon}
+                      value={unassignedSummary.openCount}
+                      title={unassignedSummary.openCount > 0 ? 'Ver defeitos de casos sem requisito' : 'Nenhum defeito aberto em casos sem requisito'}
+                      variant={unassignedSummary.openCount > 0 ? 'attention' : 'default'}
+                      className="h-5 w-[40px] px-1.5 text-[11px]"
+                      onClick={() => {
+                        const ids = unassignedSummary.caseIds;
+                        if (ids.length && unassignedSummary.openCount > 0) {
+                          navigate(`/management?tab=defects&cases=${ids.join(',')}`);
+                        } else {
+                          navigate('/management?tab=defects');
+                        }
+                      }}
+                      ariaLabel="Ver defeitos de casos sem requisito"
+                    />
+                  </div>
+                </div>
+              )}
               </div>
             </div>
           )}

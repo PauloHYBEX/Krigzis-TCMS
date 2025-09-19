@@ -139,12 +139,17 @@ supabase functions deploy delete-user --project-ref mhhzdykyjgrnprcyhlbz
 
 ## 📚 Documentação Completa
 
-Documentação detalhada está em `docs/`:
+Documentação consolidada (fonte de verdade) em `docs/`:
 
-- **[docs/01-configuracao/](docs/01-configuracao/)** - Setup completo do Supabase
-- **[docs/00-visao-geral/](docs/00-visao-geral/)** - Arquitetura e visão executiva
-- **[docs/02-banco-dados/](docs/02-banco-dados/)** - Migrations e estrutura DB
-- **[docs/03-diagnosticos-correcoes/](docs/03-diagnosticos-correcoes/)** - Troubleshooting
+- **Guia do Sistema** – visão, arquitetura, módulos, permissões, IA, APIs
+  - [docs/01-Guia-do-Sistema.md](docs/01-Guia-do-Sistema.md)
+- **SQL — Banco de Dados (Supabase)** – setup, RLS, scripts e troubleshooting
+  - [docs/02-SQL-e-Banco-de-Dados.md](docs/02-SQL-e-Banco-de-Dados.md)
+- **Historiologia de Desenvolvimento** – histórico, diagnósticos, plano de ação
+  - [docs/03-Historico-e-Planos.md](docs/03-Historico-e-Planos.md)
+
+Conteúdo legado/referência histórica permanece listado em:
+- [docs/README.md](docs/README.md)
 
 ## 🚀 Deploy
 

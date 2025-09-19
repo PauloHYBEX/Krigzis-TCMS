@@ -35,6 +35,8 @@ import { StandardButton } from '@/components/StandardButton';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import { useNavigate } from 'react-router-dom';
 import { useProject } from '@/contexts/ProjectContext';
+import { Badge } from '@/components/ui/badge';
+import { supabase } from '@/integrations/supabase/client';
 
 interface RecentItem {
   id: string;
@@ -47,11 +49,12 @@ interface RecentItem {
 }
 
 export const Dashboard = () => {
+  const SINGLE_TENANT = String((import.meta as any).env?.VITE_SINGLE_TENANT ?? 'true') === 'true';
   const { user } = useAuth();
   const { settings } = useDashboardSettings();
   const { currentProject } = useProject();
   const navigate = useNavigate();
-  const displayName = user?.user_metadata?.full_name || user?.email || 'Usuário';
+  const [welcomeName, setWelcomeName] = useState<string>('Usuário');
   const [stats, setStats] = useState({
     totalPlans: 0,
     totalCases: 0,
@@ -69,9 +72,25 @@ export const Dashboard = () => {
   >([]);
 
   useEffect(() => {
-    if (user) {
-      loadDashboardData();
-    }
+    const load = async () => {
+      if (!user) return;
+      if (SINGLE_TENANT) {
+        setWelcomeName((user.user_metadata as any)?.full_name || user.email || 'Usuário');
+      } else {
+        try {
+          const { data } = await supabase
+            .from('profiles' as any)
+            .select('display_name, email')
+            .eq('id', user.id)
+            .maybeSingle();
+          setWelcomeName((data as any)?.display_name || user.email || 'Usuário');
+        } catch {
+          setWelcomeName(user.email || 'Usuário');
+        }
+      }
+      await loadDashboardData();
+    };
+    load();
   }, [user, currentProject?.id]);
 
   const loadDashboardData = async () => {
@@ -166,7 +185,7 @@ export const Dashboard = () => {
       setRecentItems(allItems.slice(0, 5));
 
       // Progresso por Plano (percentual de aprovados entre executados)
-      let progressPerPlan = plans.map((plan) => {
+      const progressPerPlan = plans.map((plan) => {
         const exs = executions.filter((e) => e.plan_id === plan.id);
         const executed = exs.filter((e) => e.status !== 'not_tested');
         const passed = exs.filter((e) => e.status === 'passed');
@@ -325,14 +344,21 @@ export const Dashboard = () => {
       <div className="flex flex-col gap-4 px-3 sm:px-5 lg:px-6 xl:px-8 2xl:px-16">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
           <div>
-            <h2 className="text-3xl font-bold text-foreground">Bem-vindo, {displayName}!</h2>
+            <h2 className="text-3xl font-bold text-foreground">Bem-vindo, {welcomeName}!</h2>
           </div>
           <div className="flex gap-2 self-start md:self-auto">
             <Dialog open={showForm} onOpenChange={setShowForm}>
               <DialogTrigger asChild>
-                <StandardButton icon={Plus} className="bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0">
-                  {quickActionConfig.label}
-                </StandardButton>
+                <span>
+                  <StandardButton 
+                    icon={Plus} 
+                    className="bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0"
+                    disabled={!!currentProject && currentProject.status !== 'active'}
+                    title={currentProject && currentProject.status !== 'active' ? 'Projeto não ativo — ações de criação desabilitadas' : undefined}
+                  >
+                    {quickActionConfig.label}
+                  </StandardButton>
+                </span>
               </DialogTrigger>
               <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                 <FormComponent 
@@ -354,7 +380,7 @@ export const Dashboard = () => {
 
       {/* Stats Cards (compact) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 px-3 sm:px-5 lg:px-6 xl:px-8 2xl:px-16">
-        <Card className="card-hover">
+        <Card className="card-hover cursor-pointer" onClick={() => navigate('/plans')}>
           <CardHeader className="p-4 pb-2">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-md bg-brand/20 flex items-center justify-center">
@@ -369,7 +395,7 @@ export const Dashboard = () => {
           </CardContent>
         </Card>
 
-        <Card className="card-hover">
+        <Card className="card-hover cursor-pointer" onClick={() => navigate('/executions')}>
           <CardHeader className="p-4 pb-2">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-md bg-success/20 flex items-center justify-center">
@@ -384,7 +410,7 @@ export const Dashboard = () => {
           </CardContent>
         </Card>
 
-        <Card className="card-hover">
+        <Card className="card-hover cursor-pointer" onClick={() => navigate('/management?tab=defects')}>
           <CardHeader className="p-4 pb-2">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-md bg-destructive/20 flex items-center justify-center">
@@ -399,7 +425,7 @@ export const Dashboard = () => {
           </CardContent>
         </Card>
 
-        <Card className="card-hover">
+        <Card className="card-hover cursor-pointer" onClick={() => navigate('/cases')}>
           <CardHeader className="p-4 pb-2">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-md bg-info/20 flex items-center justify-center">

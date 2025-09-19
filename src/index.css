@@ -52,8 +52,10 @@
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
 
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
+    /* Primária (turquesa) para tema claro */
+    /* #00C2A8 = hsl(172 100% 38%), hover: #00E5C0 = hsl(168 100% 45%) */
+    --primary: 172 100% 38%;
+    --primary-foreground: 0 0% 100%;
 
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
@@ -69,7 +71,7 @@
 
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
+    --ring: 172 100% 38%;
 
     --radius: 0.75rem;
 
@@ -81,69 +83,75 @@
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217.2 91.2% 59.8%;
-    /* semantic tokens for redesign */
-    /* brand set to dark blue for better contrast in light theme */
-    --brand: 221 83% 53%; /* azul escuro para contraste no tema claro */
-    --brand-foreground: 210 40% 98%;
+    /* semantic tokens for redesign (light) */
+    --brand: 172 100% 38%; /* #00C2A8 */
+    --brand-hover: 168 100% 45%; /* #00E5C0 */
+    /* Texto dos botões (preto) */
+    --brand-foreground: 0 0% 10%;
     --info: 199 89% 48%;
     --info-foreground: 210 40% 98%;
-    --success: 142 71% 45%;
+    --success: 142 71% 45%; /* verde suave para sucesso */
     --success-foreground: 140 5% 10%;
-    --warning: 38 92% 50%;
-    --warning-foreground: 222.2 47.4% 11.2%;
+    --warning: 46 92% 63%; /* #F7C948 dourado */
+    --warning-foreground: 0 0% 12%;
     --neutral: 210 6% 93%;
     --neutral-foreground: 222.2 47.4% 11.2%;
   }
 
   .dark {
-    /* Paleta escura alinhada ao Figma: fundo #0D0D0D, cartões #1A1A1A, bordas #2A2A2A */
-    --background: 0 0% 5%;
-    --foreground: 0 0% 88%;
+    /* Paleta escura harmonizada */
+    --background: 0 0% 7%;   /* #121212 */
+    --foreground: 0 0% 90%;  /* texto principal */
 
-    --card: 0 0% 10%;
-    --card-foreground: 0 0% 88%;
+    --card: 0 0% 12%;        /* #1E1E1E */
+    --card-foreground: 0 0% 90%;
 
-    --popover: 0 0% 10%;
-    --popover-foreground: 0 0% 88%;
+    --popover: 0 0% 12%;
+    --popover-foreground: 0 0% 90%;
 
-    --primary: 217 91% 60%;
-    --primary-foreground: 222 47% 11%;
+    /* Primária (turquesa) */
+    --primary: 172 100% 38%;
+    --primary-foreground: 0 0% 10%;
 
-    --secondary: 0 0% 16%;
-    --secondary-foreground: 0 0% 88%;
+    /* Secundária: variação da primária (um pouco mais clara) */
+    --secondary: 168 100% 45%;
+    --secondary-foreground: 0 0% 10%;
 
     --muted: 0 0% 16%;
-    --muted-foreground: 215 20% 65%;
+    --muted-foreground: 0 0% 70%;
 
     --accent: 0 0% 16%;
     --accent-foreground: 0 0% 88%;
 
-    --destructive: 0 63% 31%;
+    --destructive: 0 72% 50%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 0 0% 16%;
-    --input: 0 0% 12%;
-    --ring: 224 76% 48%;
+    --border: 0 0% 18%;      /* ~#2E2E2E */
+    --input: 0 0% 14%;
+    --ring: 172 100% 38%;
     
     --sidebar-background: 0 0% 10%;
     --sidebar-foreground: 0 0% 88%;
-    --sidebar-primary: 180 100% 50%;
-    --sidebar-primary-foreground: 0 0% 5%;
+    --sidebar-primary: 172 100% 38%;
+    --sidebar-primary-foreground: 0 0% 6%;
     --sidebar-accent: 0 0% 16%;
-    --sidebar-accent-foreground: 0 0% 88%;
-    --sidebar-border: 0 0% 16%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-accent-foreground: 0 0% 90%;
+    --sidebar-border: 0 0% 18%;
+    --sidebar-ring: 172 100% 38%;
+
     /* Tokens semânticos (dark) */
-    --brand: 180 100% 50%; /* #00FFFF */
-    --brand-foreground: 0 0% 5%;
+    --brand: 172 100% 38%;    /* #00C2A8 */
+    --brand-hover: 168 100% 45%; /* #00E5C0 */
+    /* Texto dos botões no dark (também preto para manter padrão solicitado) */
+    --brand-foreground: 0 0% 10%;
     --info: 199 89% 48%;
     --info-foreground: 0 0% 100%;
     --success: 142 71% 45%;
     --success-foreground: 0 0% 100%;
-    --warning: 38 92% 50%;
-    --warning-foreground: 222.2 47.4% 11.2%;
-    --neutral: 220 10% 22%;
-    --neutral-foreground: 210 40% 98%;
+    --warning: 46 92% 63%;    /* dourado */
+    --warning-foreground: 0 0% 12%;
+    --neutral: 0 0% 20%;
+    --neutral-foreground: 0 0% 92%;
   }
 }
 
@@ -217,11 +225,14 @@
   }
 
   .card-hover {
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
   }
   .card-hover:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 8px 30px rgba(0, 255, 255, 0.1);
+    transform: translateY(-3px);
+    /* sombra neutra + glow suave na cor do sistema (sem contorno de borda) */
+    box-shadow:
+      0 10px 24px rgba(0, 0, 0, 0.18),
+      0 8px 26px hsl(var(--brand) / 0.28);
   }
 }
 

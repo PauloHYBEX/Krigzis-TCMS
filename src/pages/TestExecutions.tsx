@@ -444,6 +444,8 @@ export const TestExecutions = () => {
             <StandardButton 
               onClick={() => {}}
               className="bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0"
+              disabled={!currentProject || currentProject.status !== 'active'}
+              title={!currentProject ? 'Selecione um projeto ativo para criar execuções' : (currentProject.status !== 'active' ? 'Projeto não ativo — criação desabilitada' : undefined)}
             >
               <Plus className="h-4 w-4 mr-2" />
               Nova Execução
@@ -596,6 +598,8 @@ export const TestExecutions = () => {
                 params.delete('id');
                 setSearchParams(params);
               }}
+              disabled={!currentProject || currentProject.status !== 'active'}
+              title={!currentProject ? 'Selecione um projeto ativo para criar execuções' : (currentProject.status !== 'active' ? 'Projeto não ativo — criação desabilitada' : undefined)}
             >
               Criar Primeira Execução
             </StandardButton>
@@ -606,7 +610,7 @@ export const TestExecutions = () => {
               paginatedExecutions.map((execution) => (
                 <Card
                   key={execution.id}
-                  className="hover:shadow-lg transition-all duration-200 border border-border/50 hover:border-brand/50 h-full flex flex-col cursor-pointer"
+                  className="border border-border/50 h-full flex flex-col cursor-pointer card-hover"
                   onClick={() => handleViewDetails(execution)}
                 >
                   <CardHeader className="p-4 pb-3 flex-shrink-0">
@@ -708,6 +712,8 @@ export const TestExecutions = () => {
                           size="sm"
                           onClick={(e) => { e.stopPropagation(); setSelectedExecution(execution); setShowEditForm(true); }}
                           className="h-8 w-8 p-0"
+                          disabled={!currentProject || currentProject.status !== 'active'}
+                          title={!currentProject ? 'Selecione um projeto ativo para editar execuções' : (currentProject.status !== 'active' ? 'Projeto não ativo — edição desabilitada' : undefined)}
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -715,7 +721,7 @@ export const TestExecutions = () => {
                           variant="ghost"
                           size="sm"
                           onClick={(e) => { e.stopPropagation(); requestDelete(execution.id); }}
-                          className="h-8 w-8 p-0 text-destructive hover:text-destructive/80"
+                          className="h-8 w-8 p-0"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>

@@ -30,6 +30,7 @@ import {
 import SearchableCombobox from '@/components/SearchableCombobox';
 import { Input } from '@/components/ui/input';
 import { ViewModeToggle } from '@/components/ViewModeToggle';
+import { DetailModal } from '@/components/DetailModal';
 import { useProject } from '@/contexts/ProjectContext';
 import { usePermissions } from '@/hooks/usePermissions';
 
@@ -54,6 +55,8 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCaseIds, setFilterCaseIds] = useState<string[]>([]);
+  const [selectedDefect, setSelectedDefect] = useState<Defect | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
 
   // Form state
   const [title, setTitle] = useState('');
@@ -102,6 +105,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const id = params.get('id');
+    const modal = params.get('modal');
     const openCreateFlag = params.get('openCreate');
     const casesParam = params.get('cases');
     if (casesParam) {
@@ -112,7 +116,10 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
     }
     if (id && defects.length > 0) {
       const d = defects.find(x => x.id === id);
-      if (d) openEdit(d);
+      if (d) {
+        if (modal === 'defect:edit') openEdit(d);
+        else setSelectedDefect(d), setShowDetailModal(true);
+      }
     }
     if (openCreateFlag === '1') {
       openCreate();
@@ -127,6 +134,10 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
     const params = new URLSearchParams(location.search);
     if (params.has('id')) {
       params.delete('id');
+      navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
+    }
+    if (params.has('modal')) {
+      params.delete('modal');
       navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
     }
     if (params.has('openCreate')) {
@@ -158,7 +169,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
       setDefects(defList as Defect[]);
       const map: Record<string, string> = {};
       for (const e of execList as TestExecution[]) {
-        if ((e as any).id && (e as any).case_id) map[(e as any).id] = (e as any).case_id;
+        if (e.id && e.case_id) map[e.id] = e.case_id;
       }
       setExecutionCaseMap(map);
       setProjectCases(projCases as TestCase[]);
@@ -193,6 +204,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
     setShowForm(true);
     const params = new URLSearchParams(location.search);
     params.set('id', d.id);
+    params.set('modal', 'defect:edit');
     navigate({ pathname: location.pathname, search: params.toString() }, { replace: false });
     // carregar execuções do caso (se houver)
     if (d.case_id && user) {
@@ -200,6 +212,15 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
     } else {
       setCaseExecutions([]);
     }
+  };
+
+  const handleViewDetails = (d: Defect) => {
+    setSelectedDefect(d);
+    setShowDetailModal(true);
+    const params = new URLSearchParams(location.search);
+    params.set('id', d.id);
+    params.set('modal', 'defect:view');
+    navigate({ pathname: location.pathname, search: params.toString() }, { replace: false });
   };
 
   const submit = async () => {
@@ -215,7 +236,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
         }
       }
       if (editing) {
-        const updated = await updateDefect(editing.id, { title, description, severity, status, case_id: caseId || null, execution_id: executionId || null } as any);
+        const updated = await updateDefect(editing.id, { title, description, severity, status, case_id: caseId || null, execution_id: executionId || null });
         setDefects(prev => prev.map(r => r.id === updated.id ? updated : r));
         toast({ title: 'Atualizado', description: 'Defeito atualizado com sucesso.' });
       } else {
@@ -223,7 +244,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
           toast({ title: 'Selecione um projeto', description: 'É necessário selecionar um projeto para criar defeitos.', variant: 'destructive' });
           return;
         }
-        const created = await createDefect({ user_id: user.id, project_id: currentProject.id, title, description, severity, status, case_id: caseId || null, execution_id: executionId || null } as any);
+        const created = await createDefect({ user_id: user.id, project_id: currentProject.id, title, description, severity, status, case_id: caseId || null, execution_id: executionId || null });
         setDefects(prev => [created, ...prev]);
         toast({ title: 'Criado', description: 'Defeito criado com sucesso.' });
       }
@@ -406,7 +427,11 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
           {viewMode === 'cards' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filtered.map(d => (
-                <Card key={d.id} className="h-full flex flex-col hover:shadow-lg transition-all duration-200 border border-border/50 hover:border-brand/50 overflow-hidden">
+                <Card
+                  key={d.id}
+                  className="h-full flex flex-col border border-border/50 overflow-hidden cursor-pointer card-hover"
+                  onClick={() => handleViewDetails(d)}
+                >
                   <CardHeader className="p-4 pb-3">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-2 min-w-0">
@@ -436,7 +461,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
                             iconOnly 
                             ariaLabel="Editar"
                             icon={Pencil}
-                            onClick={() => openEdit(d)}
+                            onClick={(e) => { e.stopPropagation(); openEdit(d); }}
                             className="h-8 w-8"
                           />
                         )}
@@ -448,7 +473,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
                             iconOnly 
                             ariaLabel="Excluir"
                             icon={Trash2}
-                            onClick={() => remove(d.id)}
+                            onClick={(e) => { e.stopPropagation(); remove(d.id); }}
                             className="h-8 w-8"
                           />
                         )}
@@ -461,7 +486,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
           ) : (
             <div className="bg-card border border-border rounded-lg overflow-hidden">
               {/* Header */}
-              <div className="grid grid-cols-[80px_1fr_120px_120px_100px] items-start gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              <div className="grid grid-cols-[80px_1fr_120px_120px_100px] items-center gap-4 px-4 py-3 bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 <div className="pt-px">ID</div>
                 <div className="text-center pt-px">Título</div>
                 <div className="text-center pt-px">Severidade</div>
@@ -471,13 +496,17 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
               {/* Rows */}
               <div className="divide-y divide-border">
                 {filtered.map((d) => (
-                  <div key={d.id} className="grid grid-cols-[80px_1fr_120px_120px_100px] items-start gap-4 px-4 py-3 hover:bg-muted/30 transition-colors">
+                  <div 
+                    key={d.id}
+                    className="grid grid-cols-[80px_1fr_120px_120px_100px] items-center gap-4 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                    onClick={() => handleViewDetails(d)}
+                  >
                     {/* ID */}
                     <div className="flex items-center">
                       <span className="text-xs font-mono bg-brand/10 text-brand px-2 py-1 rounded">{`DEF-${(d.id || '').slice(0,4)}`}</span>
                     </div>
                     {/* Título */}
-                    <div className="font-medium text-center flex items-center justify-center min-w-0">
+                    <div className="text-sm font-medium leading-tight text-center flex items-center justify-center min-w-0">
                       <span className="truncate">{d.title}</span>
                     </div>
                     {/* Severidade */}
@@ -490,7 +519,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => openEdit(d)}
+                          onClick={(e) => { e.stopPropagation(); openEdit(d); }}
                           className="h-8 w-8 p-0"
                           title="Editar"
                           aria-label="Editar"
@@ -502,7 +531,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => remove(d.id)}
+                          onClick={(e) => { e.stopPropagation(); remove(d.id); }}
                           className="h-8 w-8 p-0"
                           title="Excluir"
                           aria-label="Excluir"
