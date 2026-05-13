@@ -5,14 +5,13 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import KrigzisLogo from '@/components/branding/KrigzisLogo';
-import { Eye, EyeOff, User, Mail, Lock, Key } from 'lucide-react';
+import { Eye, EyeOff, User, Mail, Lock } from 'lucide-react';
 
 export default function Register() {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [databaseCode, setDatabaseCode] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -110,21 +109,6 @@ export default function Register() {
                   </div>
                 </div>
                 
-                <div className="space-y-2 relative">
-                  <div className="relative">
-                    <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      type="text"
-                      placeholder="Código de acesso (opcional)"
-                      value={databaseCode}
-                      onChange={e => setDatabaseCode(e.target.value)}
-                      className="h-12 pl-10 pr-4 bg-background/50 border-border/50 focus:border-brand/50 focus:ring-brand/20"
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground px-1">
-                    Se você tem um código de acesso de uma organização, cole-o acima
-                  </p>
-                </div>
               </div>
               
               {error && <div className="text-destructive text-sm text-center bg-destructive/10 p-3 rounded-lg border border-destructive/20">{error}</div>}

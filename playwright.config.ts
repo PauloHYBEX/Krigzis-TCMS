@@ -9,11 +9,21 @@ export default defineConfig({
   use: {
     trace: 'on-first-retry',
     headless: true,
+    baseURL: 'http://localhost:5173',
   },
   projects: [
     {
       name: 'msedge',
-      use: { ...devices['Desktop Edge'] },
+      use: {
+        ...devices['Desktop Edge'],
+        channel: 'msedge'
+      },
     },
   ],
+  webServer: {
+    command: 'npm run dev:all',
+    port: 5173,
+    reuseExistingServer: true,
+    timeout: 120 * 1000,
+  },
 });

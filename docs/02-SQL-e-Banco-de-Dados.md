@@ -1,102 +1,92 @@
-# SQL — Banco de Dados (Supabase)
+# SQL — Banco de Dados (SQLite local)
 
-Este documento unifica todo o conteúdo de configuração e operação do banco para o Krigzis‑TCMS em um único lugar.
+Este documento descreve o banco de dados do Nexus TCMS: um SQLite local gerenciado pelo servidor Express.
 
-Abrange:
-- Preparação do projeto Supabase
-- Execução do SQL de criação/ajuste de schema
-- RLS e permissões
-- Scripts e migrações disponíveis
-- Verificações e troubleshooting
+## 1. Arquivos relevantes
 
-Fontes consolidadas: `docs/01-configuracao/CONFIGURACAO_SUPABASE.md`, `docs/01-configuracao/RESUMO_CONFIGURACAO.md`, diretório `docs/02-banco-dados/` e instruções correlatas em diagnósticos.
+| Arquivo | Descrição |
+|---|---|
+| `server/schema.sql` | Schema completo (tabelas + índices) |
+| `server/db.js` | Conexão via `better-sqlite3`, WAL, FK habilitadas |
+| `server/index.js` | Auto-migration no boot (adiciona colunas/tabelas faltantes) |
+| `data/nexus_testing.db` | Banco em tempo de execução (gitignored) |
 
-## 1. Pré‑requisitos
+## 2. Tabelas principais
 
-- Projeto Supabase criado.
-- Acesso ao Dashboard do Supabase.
-- (Opcional) Supabase CLI instalado e autenticado.
+| Tabela | Descrição |
+|---|---|
+| `profiles` | Usuários (email, role, password_hash, display_name) |
+| `user_permissions` | Permissões granulares por usuário |
+| `projects` | Projetos de teste |
+| `test_plans` | Planos de teste (por projeto) |
+| `test_cases` | Casos de teste (por plano/projeto) |
+| `test_executions` | Execuções de casos |
+| `requirements` | Requisitos funcionais |
+| `defects` | Defeitos vinculados a execuções/casos |
+| `requirements_cases` | Tabela de junção Requirements ↔ Cases |
+| `api_keys` | Chaves de API de LLMs criptografadas (AES-256-GCM) |
+| `notifications` | Notificações internas por usuário |
+| `activity_logs` | Audit trail de ações |
 
-Variáveis de ambiente na aplicação (arquivo `.env.local`):
-```env
-VITE_SUPABASE_URL=https://<seu-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=<sua-anon-key>
-```
+## 3. Segurança do banco
 
-## 2. Setup inicial — Executar SQL
+- **Chaves de API** nunca são armazenadas em texto claro. Usam AES-256-GCM com chave derivada do `LOCAL_AUTH_SECRET` via `scrypt` (`server/lib/crypto.js`).
+- **Integridade referencial**: `PRAGMA foreign_keys = ON` ativo em toda conexão.
+- **WAL mode**: `PRAGMA journal_mode = WAL` para concorrência segura.
+- O arquivo `.db` é gitignored — nunca commitar dados reais.
 
-1) Abra o Supabase Dashboard → SQL → New Query.
-2) Cole e execute o SQL principal (schema + RLS + triggers). Você pode optar por:
-- Usar os trechos e instruções consolidados NESTE guia.
-- Ou aplicar as migrações oficiais do repositório em `supabase/migrations/` (recomendado para evolução contínua).
+## 4. Auto-migration
 
-Após executar, você deve ter (exemplos):
-- Tabelas: `profiles`, `user_permissions`, `test_plans`, `test_cases`, `test_executions`, `user_settings`, `todo_folders`, `todo_items` (nomes variam conforme versão).
-- RLS habilitado nas tabelas críticas.
-- Triggers de `updated_at` ativas.
+O servidor aplica automaticamente no boot:
+1. Executa `server/schema.sql` (tabelas via `CREATE TABLE IF NOT EXISTS`).
+2. Adiciona colunas faltantes em tabelas existentes (colunas detectadas por introspection).
+3. Cria índices de performance (idempotentes).
 
-## 3. Autenticação e URLs
+Para novas colunas ou tabelas, adicione em `server/schema.sql` e no bloco `extraTables` de `server/index.js`.
 
-Dashboard → Authentication → Settings:
-- Site URL: `http://localhost:8080`
-- Redirect URLs: `http://localhost:8080/**`
-
-## 4. RLS e Permissões
-
-- RLS ativado em tabelas de usuários, testes e TODO.
-- Políticas padrão permitem que usuários acessem apenas seus próprios registros ou os da organização (onde aplicável).
-- Consulte as migrações em `supabase/migrations/` como fonte de verdade para evolução do schema e RLS.
-
-## 5. Migrações oficiais (supabase/migrations/)
-
-Prefira aplicar as migrações versionadas em `supabase/migrations/` para manter consistência entre ambientes. Se necessário, os trechos SQL deste guia podem ser usados como referência rápida.
-
-## 6. Verificações rápidas (SQL)
+## 5. Índices de performance
 
 ```sql
--- Verificar tabelas essenciais
-SELECT table_name
-FROM information_schema.tables
-WHERE table_schema = 'public'
-  AND table_name IN (
-    'profiles','user_permissions','test_plans','test_cases','test_executions',
-    'todo_folders','todo_items','user_settings'
-  );
+-- Notificações não lidas (Header polling)
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, read_at);
 
--- Conferir RLS ligado
-SELECT relname AS table, relrowsecurity AS rls
-FROM pg_class WHERE relkind='r' AND relnamespace = 'public'::regnamespace;
+-- Defeitos por execução/caso/plano
+CREATE INDEX IF NOT EXISTS idx_defects_execution ON defects(execution_id);
+CREATE INDEX IF NOT EXISTS idx_defects_case ON defects(case_id);
+CREATE INDEX IF NOT EXISTS idx_defects_plan ON defects(plan_id);
+
+-- Rastreabilidade
+CREATE INDEX IF NOT EXISTS idx_requirements_cases_req ON requirements_cases(requirement_id);
+CREATE INDEX IF NOT EXISTS idx_requirements_cases_case ON requirements_cases(case_id);
+
+-- Casos por projeto+status (dashboards)
+CREATE INDEX IF NOT EXISTS idx_test_cases_project_status ON test_cases(project_id, status);
 ```
 
-## 7. Troubleshooting rápido
+## 6. Verificações rápidas
 
-- Erro 404/403 ao salvar configurações:
-  - Execute o setup SQL completo primeiro.
-  - Garanta que `user_settings` existe.
-- "relation does not exist":
-  - Reexecute o SQL de setup e confirme o schema.
-- Violações RLS:
-  - Confira políticas para a tabela afetada; ajuste conforme as consultas reais da aplicação.
+```bash
+# Abrir o banco com sqlite3 CLI
+sqlite3 data/nexus_testing.db
 
-## 8. CLI (opcional)
+# Listar tabelas
+.tables
 
-```powershell
-supabase login
-supabase link --project-ref <seu-ref>
-# Secrets comuns das Edge Functions (se usar):
-supabase functions secrets set \
-  --project-ref <seu-ref> \
-  SUPABASE_URL="https://<seu-ref>.supabase.co" \
-  SUPABASE_ANON_KEY="<anon>" \
-  SUPABASE_SERVICE_ROLE_KEY="<service>"
+# Ver estrutura de uma tabela
+.schema test_plans
+
+# Contar registros
+SELECT COUNT(*) FROM profiles;
+SELECT COUNT(*) FROM test_cases;
 ```
 
-## 9. Pós‑setup — Executando a aplicação
+## 7. Troubleshooting
 
-1) `npm install`
-2) Preencha `.env.local` (acima).
-3) `npm run dev` (porta 8080 por padrão) e navegue na aplicação.
+- **Banco não inicializa**: verificar `LOCAL_AUTH_SECRET` no `.env` e que `data/` é gravável.
+- **FOREIGN KEY constraint failed**: verificar se a entidade referenciada existe antes de inserir.
+- **Coluna não existe**: o auto-migration deve adicionar; reiniciar o servidor resolve na maioria dos casos.
+- **API key inválida após reset do LOCAL_AUTH_SECRET**: re-cadastrar as chaves no MCP (a chave derivada muda com o secret).
 
 ---
 
-Changelog deste guia: versão 1.0 (consolidação inicial).
+Changelog: v1.0 (Supabase/PostgreSQL) → v2.0 (SQLite/Express local, mai/2026).

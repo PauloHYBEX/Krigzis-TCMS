@@ -77,7 +77,8 @@ export const ModelControlPanel = () => {
   const [inlineForms, setInlineForms] = useState<Record<string, Partial<AIModel>>>({});
   const [showApiKeyFor, setShowApiKeyFor] = useState<Record<string, boolean>>({});
   const [capInput, setCapInput] = useState<Record<string, string>>({});
-  const [hideInactive, setHideInactive] = useState(false); // Ocultar modelos inativos
+  const hideInactive = aiSettings?.hideInactiveModels ?? false;
+  const setHideInactive = (val: boolean) => updateAISettings({ hideInactiveModels: val });
 
   // Fetch provider models
   const [fetchedModels, setFetchedModels] = useState<Record<string, ProviderModel[]>>({}); // keyed by ctx ('new' or modelId)

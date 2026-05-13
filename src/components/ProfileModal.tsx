@@ -224,7 +224,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
     try {
       const { error } = await supabase
         .from('role_requests' as any)
-        .insert({ user_id: user.id, requested_roles: requestedRoles });
+        .insert({
+          user_id: user.id,
+          // requested_role satisfaz o NOT NULL da coluna legada (primeira opção escolhida)
+          requested_role: requestedRoles[0],
+          // requested_roles armazena todas as opções como JSON
+          requested_roles: JSON.stringify(requestedRoles),
+        });
       if (error) throw error;
       setHasRoleRequest(true);
       setRequestRolesOpen(false);

@@ -703,7 +703,7 @@ export const TestCases = () => {
             </DialogTitle>
             <DialogDescription className="sr-only">Gerar caso de teste com inteligência artificial</DialogDescription>
           </DialogHeader>
-          <AIGeneratorForm initialType="case" onSuccess={() => { setShowAIModal(false); loadCases(); }} />
+          <AIGeneratorForm initialType="case" hideTypeSelector={true} onSuccess={() => { setShowAIModal(false); loadCases(); }} />
         </DialogContent>
       </Dialog>
     </div>

@@ -1,16 +1,21 @@
 
 import { useState, useEffect } from 'react';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/hooks/useAuth';
 import { useProject } from '@/contexts/ProjectContext';
-import { createTestExecution, getTestCases, getTestPlans, updateTestExecution } from '@/services/supabaseService';
+import { createTestExecution, getTestCases, getTestPlans, updateTestExecution, notifyStakeholders } from '@/services/supabaseService';
+import { listTestRunsByProject } from '@/services/testRunsService';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/use-toast';
-import { TestExecution, TestCase, TestPlan } from '@/types';
+import { TestExecution, TestCase, TestPlan, TestRun } from '@/types';
 import SearchableCombobox from '@/components/SearchableCombobox';
 import { ProjectSelectField } from '@/components/forms/ProjectSelectField';
 import { StandardButton } from '@/components/StandardButton';
+import { useProjectUsers } from '@/hooks/useProjectUsers';
+import { UserMultiSelectField } from '@/components/forms/UserMultiSelectField';
 
 interface TestExecutionFormProps {
   onSuccess?: (execution: TestExecution) => void;
@@ -29,20 +34,28 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
   const [selectedCase, setSelectedCase] = useState<TestCase | null>(null);
   // Projeto selecionado localmente no modal (padrão: projeto atual)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(currentProject?.id || null);
+  const [runs, setRuns] = useState<TestRun[]>([]);
+  const { users, labelFor } = useProjectUsers();
   const [formData, setFormData] = useState<{
     case_id: string;
     plan_id: string;
+    run_id: string;
+    assigned_to: string;
     status: TestExecution['status'];
     actual_result: string;
     notes: string;
     executed_by: string;
+    interested_users: string[];
   }>({
     case_id: caseId || '',
     plan_id: planId || '',
+    run_id: '',
+    assigned_to: '',
     status: 'not_tested',
     actual_result: '',
     notes: '',
-    executed_by: user?.email || ''
+    executed_by: user?.email || '',
+    interested_users: [] as string[]
   });
 
   const isEdit = !!execution;
@@ -54,6 +67,7 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
   useEffect(() => {
     if (user) {
       loadPlans();
+      loadRuns();
       if (planId) {
         loadCases(planId);
       }
@@ -76,7 +90,9 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
         const saved = JSON.parse(raw);
         setFormData(prev => ({ ...prev, ...saved }));
       }
-    } catch (e) { /* noop */ }
+    } catch (e) {
+      console.warn('Draft hydration failed', e);
+    }
      
   }, [storageKey]);
 
@@ -99,10 +115,13 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
       setFormData({
         case_id: execution.case_id,
         plan_id: execution.plan_id,
+        run_id: (execution as any).run_id || '',
+        assigned_to: (execution as any).assigned_to || '',
         status: execution.status,
         actual_result: execution.actual_result || '',
         notes: execution.notes || '',
-        executed_by: execution.executed_by || user?.email || ''
+        executed_by: execution.executed_by || user?.email || '',
+        interested_users: (execution as any).interested_users || []
       });
       // Try to set selected case once cases are available
       const caseData = cases.find(c => c.id === execution.case_id);
@@ -136,19 +155,49 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
     }
   };
 
+  const loadRuns = async () => {
+    if (!selectedProjectId) { setRuns([]); return; }
+    try {
+      const data = await listTestRunsByProject(selectedProjectId);
+      // Apenas ciclos ativos/planejados sao opcoes uteis para nova execucao
+      setRuns(data.filter(r => r.status === 'planned' || r.status === 'in_progress'));
+    } catch { setRuns([]); }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
 
     setLoading(true);
     try {
+      const handleStakeholderNotifications = async (executionId: string, isUpdate: boolean) => {
+        const stakeholders = [...(formData.interested_users || [])];
+        if (formData.assigned_to && formData.assigned_to !== 'none') {
+          stakeholders.push(formData.assigned_to);
+        }
+
+        if (stakeholders.length > 0) {
+          const reporterName = (user as any)?.user_metadata?.full_name || (user as any)?.email || 'Alguém';
+          await notifyStakeholders({
+            stakeholderIds: stakeholders,
+            title: isUpdate ? 'Execução atualizada - você é interessado' : 'Nova execução registrada - você é interessado',
+            body: `${reporterName} ${isUpdate ? 'atualizou' : 'registrou'} uma execução (status: ${formData.status}).`,
+            link: `/executions?id=${executionId}`,
+          });
+        }
+      };
+
       if (isEdit && execution) {
         const updated = await updateTestExecution(execution.id, {
           status: formData.status,
           actual_result: formData.actual_result,
           notes: formData.notes,
           executed_by: formData.executed_by,
-        });
+          ...(formData.run_id !== ((execution as any).run_id || '') ? { run_id: formData.run_id || null } : {}),
+          ...(formData.assigned_to !== ((execution as any).assigned_to || '') ? { assigned_to: formData.assigned_to || null } : {}),
+          interested_users: formData.interested_users
+        } as any);
+        await handleStakeholderNotifications(updated.id, true);
         toast({
           title: 'Sucesso',
           description: 'Execução atualizada com sucesso!'
@@ -170,8 +219,12 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
         }
         const created = await createTestExecution({
           ...formData,
+          run_id: formData.run_id || null,
+          assigned_to: formData.assigned_to || null,
+          interested_users: formData.interested_users,
           user_id: user.id
-        });
+        } as any);
+        await handleStakeholderNotifications(created.id, false);
         toast({
           title: "Sucesso",
           description: "Execução registrada com sucesso!"
@@ -191,7 +244,7 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
     }
   };
 
-  const handleChange = (field: string, value: string) => {
+  const handleChange = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     
     if (field === 'case_id') {
@@ -226,27 +279,27 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
 
       {/* Plano + Caso */}
       {!isEdit && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
           {!planId && (
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Plano de Teste *</Label>
+            <div className="sm:col-span-6 space-y-1.5">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Plano de Teste *</Label>
               <SearchableCombobox
                 items={plans.map((p) => ({ value: p.id, label: p.title }))}
                 value={formData.plan_id}
                 onChange={(value) => handleChange('plan_id', value)}
-                placeholder="Selecione um plano"
+                placeholder="Selecionar plano..."
                 disabled={!selectedProjectId}
               />
             </div>
           )}
           {!caseId && (
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Caso de Teste *</Label>
+            <div className={`sm:col-span-${planId ? '12' : '6'} space-y-1.5`}>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Caso de Teste *</Label>
               <SearchableCombobox
                 items={cases.map((c) => ({ value: c.id, label: `${c.sequence ? `#${c.sequence} ` : ''}${c.title}` }))}
                 value={formData.case_id}
                 onChange={(value) => handleChange('case_id', value)}
-                placeholder="Selecione um caso"
+                placeholder="Selecionar caso..."
                 disabled={!formData.plan_id && !planId}
               />
             </div>
@@ -272,31 +325,66 @@ export const TestExecutionForm = ({ onSuccess, onCancel, caseId, planId, executi
         </div>
       )}
 
-      {/* Status */}
-      <div className="space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Status *</Label>
-        <Select value={formData.status} onValueChange={(value) => handleChange('status', value)} required>
-          <SelectTrigger className="h-9 bg-muted/30 border-border/60 focus:ring-0">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="passed">Aprovado</SelectItem>
-            <SelectItem value="failed">Reprovado</SelectItem>
-            <SelectItem value="blocked">Bloqueado</SelectItem>
-            <SelectItem value="not_tested">Não Testado</SelectItem>
-          </SelectContent>
-        </Select>
+      {/* Status + Ciclo */}
+      <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+        <div className="sm:col-span-5 space-y-1.5">
+          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status do Teste *</Label>
+          <Select value={formData.status} onValueChange={(value) => handleChange('status', value)} required>
+            <SelectTrigger className="h-10 bg-muted/20 border-border/40 focus:ring-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="passed">Aprovado</SelectItem>
+              <SelectItem value="failed">Reprovado</SelectItem>
+              <SelectItem value="blocked">Bloqueado</SelectItem>
+              <SelectItem value="not_tested">Não Testado</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="sm:col-span-7 space-y-1.5">
+          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Ciclo de Execução</Label>
+          <SearchableCombobox
+            items={[{ value: '', label: '— sem ciclo —' }, ...runs.map(r => ({ value: r.id, label: `${r.sequence ? `RUN-${String(r.sequence).padStart(3, '0')} • ` : ''}${r.title}` }))]}
+            value={formData.run_id}
+            onChange={(v) => handleChange('run_id', v || '')}
+            placeholder="Pesquisar ciclos..."
+            disabled={runs.length === 0}
+          />
+        </div>
       </div>
 
-      {/* Executado por */}
-      <div className="space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Executado por</Label>
-        <input
-          value={formData.executed_by}
-          onChange={(e) => handleChange('executed_by', e.target.value)}
-          className="w-full h-9 rounded-md bg-muted/30 border border-border/60 px-3 text-sm focus:outline-none focus:border-brand/50"
-          required
-        />
+      {/* Interessado + Executor */}
+      <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+        <div className="sm:col-span-6 space-y-1.5">
+          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Responsável / Interessado</Label>
+          <Select value={formData.assigned_to} onValueChange={(value) => handleChange('assigned_to', value)}>
+            <SelectTrigger className="h-10 bg-muted/20 border-border/40 focus:ring-0">
+              <SelectValue placeholder="Nenhum" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Nenhum</SelectItem>
+              {users.map(u => (
+                <SelectItem key={u.id} value={u.id}>{labelFor(u)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="sm:col-span-6 space-y-1.5">
+          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Executado por</Label>
+          <Input
+            value={formData.executed_by}
+            onChange={(e) => handleChange('executed_by', e.target.value)}
+            className="h-10 bg-muted/20 border-border/40 focus:border-brand/50"
+            required
+          />
+        </div>
+        <div className="sm:col-span-12 space-y-1.5">
+          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Equipe Interessada (Notificações)</Label>
+          <UserMultiSelectField 
+            selectedIds={formData.interested_users}
+            onChange={(ids) => handleChange('interested_users', ids)}
+          />
+        </div>
       </div>
 
       {/* Resultado obtido */}

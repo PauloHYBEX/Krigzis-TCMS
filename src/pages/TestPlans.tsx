@@ -17,6 +17,7 @@ import { getTestPlans, deleteTestPlan, getPlanLinkedCounts, getPlanLinkedDetails
 import { TestPlan } from '@/types';
 import { TestPlanForm } from '@/components/forms/TestPlanForm';
 import { AIGeneratorForm } from '@/components/forms/AIGeneratorForm';
+import { UnifiedTestCreation } from '@/components/UnifiedTestCreation';
 // Removido seletor de projeto local: o controle é feito globalmente no Dashboard
 import { ProjectDisplayField } from '@/components/ProjectDisplayField';
 import { StandardButton } from '@/components/StandardButton';
@@ -848,27 +849,27 @@ export const TestPlans = () => {
         }
         setSearchParams(params);
       }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-auto-hide">
-          <DialogHeader>
-            <DialogTitle>
-              {editingPlan ? `Editar Plano ${editingPlan.sequence ? `#${editingPlan.sequence}` : ''}` : 'Novo Plano de Teste'}
-            </DialogTitle>
+        <DialogContent className={cn(editingPlan ? "max-w-2xl" : "max-w-4xl", "max-h-[90vh] overflow-hidden flex flex-col scrollbar-auto-hide")}>
+          <DialogHeader className="px-6 pt-6 shrink-0">
+            <DialogTitle>{editingPlan ? 'Editar Plano de Teste' : 'Fluxo Unificado de Criação'}</DialogTitle>
             <DialogDescription>
-              {editingPlan ? 'Atualize os campos do plano de teste selecionado.' : 'Preencha os campos para criar um novo plano de teste.'}
+              {editingPlan ? 'Ajuste as informações do plano selecionado.' : 'Defina o plano e já gere os casos de teste com IA.'}
             </DialogDescription>
           </DialogHeader>
-          <TestPlanForm 
-            initialData={editingPlan}
-            onSuccess={handlePlanCreated}
-            onCancel={() => {
-              setShowForm(false);
-              setEditingPlan(null);
-              const params = new URLSearchParams(searchParams);
-              params.delete('modal');
-              params.delete('id');
-              setSearchParams(params);
-            }}
-          />
+          <div className="flex-1 overflow-y-auto custom-scrollbar px-6 pb-6">
+            {editingPlan ? (
+              <TestPlanForm
+                initialData={editingPlan}
+                onSuccess={(p) => handlePlanCreated(p)}
+                onCancel={() => { setShowForm(false); setEditingPlan(null); }}
+              />
+            ) : (
+              <UnifiedTestCreation
+                onSuccess={() => { loadPlans(); setShowForm(false); }}
+                onCancel={() => setShowForm(false)}
+              />
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -954,7 +955,7 @@ export const TestPlans = () => {
             </DialogTitle>
             <DialogDescription className="sr-only">Gerar plano de teste com inteligência artificial</DialogDescription>
           </DialogHeader>
-          <AIGeneratorForm initialType="plan" onSuccess={() => { setShowAIModal(false); loadPlans(); }} />
+          <AIGeneratorForm initialType="plan" hideTypeSelector={true} onSuccess={() => { setShowAIModal(false); loadPlans(); }} />
         </DialogContent>
       </Dialog>
 
@@ -967,7 +968,7 @@ export const TestPlans = () => {
           setLinkedDetails(null);
         }
       }}>
-        <AlertDialogContent className="max-w-lg scrollbar-auto-hide">
+        <AlertDialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-auto-hide">
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir plano de teste?</AlertDialogTitle>
           </AlertDialogHeader>

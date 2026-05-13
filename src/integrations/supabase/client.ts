@@ -249,4 +249,5 @@ export const supabase = {
   rpc,
   channel: createChannel,
   removeChannel: (_channel: any) => undefined,
+  get: (path: string) => apiFetch(path, { method: 'GET' }),
 };

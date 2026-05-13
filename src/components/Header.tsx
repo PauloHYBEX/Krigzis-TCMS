@@ -163,10 +163,10 @@ export const Header = () => {
             {/* Notificações (sininho) */}
             <DropdownMenu open={notifOpen} onOpenChange={setNotifOpen}>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="relative">
-                  <Bell className="h-5 w-5" />
+                <Button variant="ghost" size="icon" className="relative group">
+                  <Bell className={`h-5 w-5 transition-transform group-hover:scale-110 ${notifCount > 0 ? 'text-brand animate-bell-pulse' : ''}`} />
                   {notifCount > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-[10px] text-white font-semibold flex items-center justify-center border-2 border-background">
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-[10px] text-white font-bold flex items-center justify-center border-2 border-background animate-ring-pulse shadow-sm">
                       {notifCount > 99 ? '99+' : notifCount}
                     </span>
                   )}
@@ -178,7 +178,7 @@ export const Header = () => {
                   {notifCount > 0 && (
                     <button
                       onClick={(e) => { e.stopPropagation(); markAllAsRead(); }}
-                      className="text-xs text-brand hover:text-brand/80 flex items-center gap-1"
+                      className="text-[10px] text-brand hover:text-brand/80 flex items-center gap-1 font-bold"
                     >
                       <Check className="h-3 w-3" />
                       Marcar todas como lidas
@@ -216,18 +216,24 @@ export const Header = () => {
                         )}
                       </div>
                     ))}
-                    {notifs.length > 3 && (
+                    <div className="flex border-t border-border">
                       <button
                         onClick={() => setShowAllNotifs(!showAllNotifs)}
-                        className="w-full py-2 text-xs text-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex items-center justify-center gap-1"
+                        className="flex-1 py-2.5 text-[11px] text-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex items-center justify-center gap-1 border-r border-border"
                       >
                         {showAllNotifs ? (
-                          <><ChevronUp className="h-3 w-3" /> Mostrar apenas últimas 3</>
+                          <><ChevronUp className="h-3 w-3" /> Mostrar menos</>
                         ) : (
                           <><ChevronDown className="h-3 w-3" /> Carregar todas ({notifs.length})</>
                         )}
                       </button>
-                    )}
+                      <button
+                        onClick={() => { navigate('/notifications'); setNotifOpen(false); }}
+                        className="flex-1 py-2.5 text-[11px] text-center text-brand font-semibold hover:bg-brand/5 transition-colors flex items-center justify-center gap-1"
+                      >
+                        Visualizar todas
+                      </button>
+                    </div>
                   </div>
                 )}
               </DropdownMenuContent>

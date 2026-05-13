@@ -946,7 +946,7 @@ export const TestExecutions = () => {
             </DialogTitle>
             <DialogDescription className="sr-only">Gerar execução de teste com inteligência artificial</DialogDescription>
           </DialogHeader>
-          <AIGeneratorForm initialType="execution" onSuccess={() => { setShowAIModal(false); loadExecutions(); }} />
+          <AIGeneratorForm initialType="execution" hideTypeSelector={true} onSuccess={() => { setShowAIModal(false); loadExecutions(); }} />
         </DialogContent>
       </Dialog>
 

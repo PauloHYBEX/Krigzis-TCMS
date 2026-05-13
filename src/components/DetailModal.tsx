@@ -3,12 +3,16 @@ import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Edit, Trash2, Calendar, User, Sparkles, Loader2, Code, LifeBuoy, Briefcase, Shield, Eye, ClipboardList, Link2, Upload, ImageIcon, X, Bug as BugIcon } from 'lucide-react';
+import { Edit, Trash2, Calendar, Sparkles, Loader2, ClipboardList, Link2, Bug as BugIcon, ChevronDown } from 'lucide-react';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { TestPlan, TestCase, TestExecution, Requirement, Defect } from '@/types';
 import { ExportDropdown } from './ExportDropdown';
+import { UserProfileModal } from './UserProfileModal';
+import { TeamAvatars } from './TeamAvatars';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { formatLocalDateTime } from '@/lib/utils';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 const userRoleLabel: Record<string, string> = {
   master: 'Master',
@@ -44,7 +48,6 @@ import {
   testCaseTypeBadgeClass,
 } from '@/lib/labels';
 import type { ExecutionStatus, TestCaseType } from '@/lib/labels';
-import { UserProfileModal } from './UserProfileModal';
 import { useProject } from '@/contexts/ProjectContext';
 
 interface DetailModalProps {
@@ -64,13 +67,15 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
   const [additionalContext, setAdditionalContext] = useState('');
   const [selectedModelId, setSelectedModelId] = useState<string>('default');
   const [author, setAuthor] = useState<{ id: string; email?: string; display_name?: string; avatar_url?: string; github_url?: string; google_url?: string; website_url?: string; tags?: any[]; role?: string } | null>(null);
+  const [assignedUser, setAssignedUser] = useState<{ id: string; email?: string; display_name?: string; avatar_url?: string; role?: string } | null>(null);
   const [executor, setExecutor] = useState<{ id: string; email?: string; display_name?: string } | null>(null);
   const [showAuthorModal, setShowAuthorModal] = useState(false);
+  const [showAssignedModal, setShowAssignedModal] = useState(false);
+  const [showExecutorModal, setShowExecutorModal] = useState(false);
   const [authorTags, setAuthorTags] = useState<Array<{ label: string; icon?: string }>>([]);
+  const [interestedProfiles, setInterestedProfiles] = useState<any[]>([]);
   const [linkedPlan, setLinkedPlan] = useState<{ id: string; sequence?: number | null; title?: string } | null>(null);
   const [linkedCase, setLinkedCase] = useState<{ id: string; sequence?: number | null; title?: string } | null>(null);
-  const [branchImages, setBranchImages] = useState<{ name: string; dataUrl: string }[]>([]);
-  const [branchFile, setBranchFile] = useState<File | null>(null);
   const [loadingBranch, setLoadingBranch] = useState(false);
   const [defectCount, setDefectCount] = useState(0);
   const [linkedReqs, setLinkedReqs] = useState<Array<{ id: string; title: string; sequence?: number | null }>>([]);
@@ -84,11 +89,10 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
       setConfirmDelete(false);
       setLinkedPlan(null);
       setLinkedCase(null);
-      setBranchImages([]);
-      setBranchFile(null);
       setDefectCount(0);
       setLinkedReqs([]);
       setLinkedCases([]);
+      setInterestedProfiles([]);
     }
   }, [isOpen]);
 
@@ -161,32 +165,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
       .catch(() => setExecutor(null));
   }, [isOpen, item, type]);
 
-  const handleBranchFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setBranchFile(f);
-    setBranchImages([]);
-    setLoadingBranch(true);
-    const ext = f.name.toLowerCase().split('.').pop() || '';
-    const isPlainText = f.type === 'text/plain' || ext === 'txt' || ext === 'md';
-    if (isPlainText) { setLoadingBranch(false); return; }
-    try {
-      const token = localStorage.getItem('krg_local_auth_token');
-      const form = new FormData();
-      form.append('file', f);
-      const res = await fetch('/api/documents/extract', {
-        method: 'POST', body: form,
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) throw new Error((await res.json()).error?.message || 'Erro ao extrair');
-      const { images: extracted } = await res.json();
-      setBranchImages(extracted || []);
-    } catch (err: any) {
-      toast({ title: 'Erro ao extrair branches', description: err?.message, variant: 'destructive' });
-    } finally {
-      setLoadingBranch(false);
-    }
-  };
+
 
   // Fetch linked plan/case for vínculos section
   useEffect(() => {
@@ -200,6 +179,31 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
     if (caseId) {
       supabase.from('test_cases').select('id, sequence, title').eq('id', caseId).maybeSingle()
         .then(({ data }) => { if (data) setLinkedCase(data as any); });
+    }
+
+    // Fetch assigned user
+    const assignedTo = (item as any).assigned_to as string | undefined;
+    if (assignedTo) {
+      supabase.from('profiles').select('id, email, display_name, avatar_url, role').eq('id', assignedTo).maybeSingle()
+        .then(({ data }) => {
+          if (data) setAssignedUser(data as any);
+          else setAssignedUser(null);
+        })
+        .catch(() => setAssignedUser(null));
+    } else {
+      setAssignedUser(null);
+    }
+
+    // Fetch interested users profiles
+    const interestedIds = (item as any).interested_users || [];
+    if (Array.isArray(interestedIds) && interestedIds.length > 0) {
+      supabase.from('profiles').select('id, email, display_name, avatar_url, role')
+        .in('id', interestedIds)
+        .then(({ data }) => {
+          if (data) setInterestedProfiles(data);
+        });
+    } else {
+      setInterestedProfiles([]);
     }
   }, [isOpen, item]);
 
@@ -264,17 +268,31 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
     }
   };
 
+  // Returns the human-readable sequence prefix for the item (e.g. PT-001, CT-002)
+  const getItemSequenceLabel = () => {
+    const seq = (item as any).sequence;
+    if (seq == null) return null;
+    const padded = String(seq).padStart(3, '0');
+    switch (type) {
+      case 'plan':        return `PT-${padded}`;
+      case 'case':        return `CT-${padded}`;
+      case 'execution':   return `EX-${padded}`;
+      case 'requirement': return `REQ-${padded}`;
+      case 'defect':      return `DEF-${padded}`;
+      default:            return `#${padded}`;
+    }
+  };
+
   const getItemTitle = () => {
     if (type === 'execution') {
-      const seq = 'sequence' in item && (item as any).sequence ? (item as any).sequence : item.id.slice(0, 8);
-      return `Execução #${seq}`;
+      const seq = 'sequence' in item && (item as any).sequence ? (item as any).sequence : null;
+      const label = seq ? `EX-${String(seq).padStart(3, '0')}` : `#${item.id.slice(0, 8)}`;
+      const notes = (item as TestExecution).notes;
+      return notes ? `${label} - ${notes.slice(0, 60)}${notes.length > 60 ? '…' : ''}` : label;
     }
-    if (type === 'defect' || type === 'requirement') {
-      return (item as Defect | Requirement).title;
-    }
-    const baseTitle = (item as TestPlan | TestCase).title;
-    const seq = 'sequence' in item && (item as any).sequence ? (item as any).sequence : null;
-    return seq ? `#${seq} — ${baseTitle}` : baseTitle;
+    const base = (item as TestPlan | TestCase | Requirement | Defect).title;
+    const seqLabel = getItemSequenceLabel();
+    return seqLabel ? `${seqLabel} - ${base}` : base;
   };
 
   const getItemDescription = () => {
@@ -529,7 +547,6 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
       if (plan.scope?.trim()) parts.push(`Escopo:\n${plan.scope}`);
       if (plan.criteria?.trim()) parts.push(`Critérios:\n${plan.criteria}`);
       if (opts?.additionalContext?.trim()) parts.push(`Contexto adicional (usuário):\n${opts.additionalContext.trim()}`);
-      if (branchImages.length > 0) parts.push(`Branches da sprint detectadas: ${branchImages.length} imagem(ns) anexadas (ver dados visuais).`);
 
       // Extrair branches reais do plano para direcionar os casos
       // Fallback: se branches vazio, tenta extrair de resources (mesma logica do modal de exibicao)
@@ -550,7 +567,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
         // Ignora headers de grupo tipo "Backend:"
         if (/^([A-Za-zÀ-ú\s\-]+):$/.test(line)) continue;
         // Remove marcadores e divide por delimitadores
-        const cleaned = line.replace(/^[\*\-\u2022]\s*/, '').trim();
+        const cleaned = line.replace(/^[*•º]\s*/, '').trim();
         const tokens = cleaned.split(/[\s,;]+/).map(t => t.trim()).filter(Boolean);
         for (const tk of tokens) {
           if (isBranchToken(tk) && !branchLines.includes(tk)) branchLines.push(tk);
@@ -562,7 +579,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
       const extractSprintLabel = (): { fallback: string; label: string } => {
         // 1) Titulo do plano: "Sprint 16/06" ou "sprint_16_06"
         const planTitle = plan.title || '';
-        const titleMatch = planTitle.match(/sprint[_\-]?(\d{1,2})[_\-\/]?(\d{1,2})(?:[_\-\/]?(\d{4}))?/i);
+        const titleMatch = planTitle.match(/sprint[_-]?(\d{1,2})[_-]?(\d{1,2})(?:[_-]?(\d{4}))?/i);
         if (titleMatch) {
           const dd = titleMatch[1].padStart(2, '0');
           const mm = titleMatch[2].padStart(2, '0');
@@ -597,7 +614,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
         : '';
 
       const prompt = `
-      Analise o seguinte documento${branchImages.length > 0 ? ' e as imagens de branches da sprint anexadas' : ''} e crie casos de teste específicos para cada funcionalidade/branch identificada.${branchInstruction}
+      Analise o seguinte documento e crie casos de teste específicos para cada funcionalidade/branch identificada.${branchInstruction}
 
       DOCUMENTO:
       ${documentContent}
@@ -647,7 +664,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
 
       const generatedData = await ModelControlService.executeTask(
         'general-completion',
-        { prompt, images: branchImages.length > 0 ? branchImages.map(i => i.dataUrl) : undefined },
+        { prompt },
         effectiveModelId || undefined
       );
 
@@ -786,25 +803,41 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
     return true;
   })();
 
+  // Consolidate all team members (author + assigned + executor + interested), deduplicated
+  const allTeamMembers = [
+    ...(author ? [{ ...author, _role: 'Autor' }] : []),
+    ...(assignedUser && assignedUser.id !== author?.id ? [{ ...assignedUser, _role: 'Atribuído' }] : []),
+    ...(executor && executor.id !== author?.id && executor.id !== assignedUser?.id ? [{ ...executor, _role: 'Executor' }] : []),
+    ...interestedProfiles.filter(p => p.id !== author?.id && p.id !== assignedUser?.id && p.id !== executor?.id),
+  ].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+
   return (<>
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto scrollbar-auto-hide">
         <DialogTitle className="sr-only">{getTypeLabel()} — {getItemTitle()}</DialogTitle>
 
-        {/* ── Header ── */}
-        <div className="mb-4">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-xl font-bold text-foreground leading-snug">
-              {getTypeLabel()} — {getItemTitle()}
+        {/* ── Header: título com espaço para botão X do dialog ── */}
+        <div className="pr-8">
+          <div className="flex items-start gap-2 flex-wrap">
+            <h2 className="text-xl font-bold text-foreground leading-snug break-words">
+              {getItemTitle()}
             </h2>
             {type === 'execution' && defectCount > 0 && (
-              <Badge className="bg-destructive text-destructive-foreground hover:bg-destructive/90 shrink-0 cursor-pointer" title={`${defectCount} defeito(s) aberto(s) vinculado(s) à execução`}>
+              <Badge
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90 shrink-0 cursor-pointer self-center"
+                title={`${defectCount} defeito(s) aberto(s) vinculado(s) à execução`}
+              >
                 <BugIcon className="h-3.5 w-3.5 mr-1" />
                 {defectCount} {defectCount === 1 ? 'defeito' : 'defeitos'}
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-2 flex-wrap mt-2">
+        </div>
+
+        {/* ── Meta row: badges (esquerda) + equipe (direita) ── */}
+        <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
+          {/* Badges de status/prioridade/tipo */}
+          <div className="flex items-center gap-2 flex-wrap">
             {('status' in item && item.status) && (
               <Badge className={
                 type === 'execution' ? executionStatusBadgeClass(item.status as ExecutionStatus)
@@ -840,30 +873,35 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-5 text-sm text-muted-foreground mt-2.5 flex-wrap">
-            <span className="flex items-center gap-1.5">
-              <Calendar className="h-3.5 w-3.5 shrink-0" />
-              {type === 'execution' ? 'Executado em:' : 'Criado em:'}{' '}
-              {formatDate(getItemDate())}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <User className="h-3.5 w-3.5 shrink-0" />
-              Autor:{' '}
-              <button
-                type="button"
-                className="text-brand hover:underline font-medium ml-0.5 focus:outline-none bg-transparent border-0 p-0"
-                onClick={() => setShowAuthorModal(true)}
-              >
-                {author?.display_name || author?.email || 'ver perfil'}
-              </button>
-              {author?.role && (
-                <span className="ml-0.5">({userRoleLabel[author.role] || author.role})</span>
-              )}
-            </span>
-          </div>
+
+          {/* Equipe — avatares à direita, alinhados com os badges */}
+          {allTeamMembers.length > 0 && (
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider">
+                Equipe
+              </span>
+              <TeamAvatars
+                users={allTeamMembers}
+                maxDisplay={3}
+                onUserClick={(uid) => {
+                  if (author?.id === uid) setShowAuthorModal(true);
+                  else if (assignedUser?.id === uid) setShowAssignedModal(true);
+                  else if (executor?.id === uid) setShowExecutorModal(true);
+                  else setShowAssignedModal(true);
+                }}
+              />
+            </div>
+          )}
         </div>
 
-        <hr className="border-border" />
+        {/* Data de criação/execução */}
+        <div className="flex items-center gap-1.5 text-sm text-muted-foreground mt-2">
+          <Calendar className="h-3.5 w-3.5 shrink-0 text-brand/70" />
+          <span className="opacity-70">{type === 'execution' ? 'Executado em:' : 'Criado em:'}</span>
+          <span className="text-foreground font-medium">{formatDate(getItemDate())}</span>
+        </div>
+
+        <hr className="border-border/60" />
 
         <div className="py-5 space-y-5">
 
@@ -907,7 +945,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
                   continue;
                 }
                 // Remove marcadores de lista e divide por espaco/virgula/ponto-e-virgula
-                const cleaned = line.replace(/^[\*\-\u2022]\s*/, '').trim();
+                const cleaned = line.replace(/^[*•º]\s*/, '').trim();
                 const tokens = cleaned.split(/[\s,;]+/).map(t => t.trim()).filter(Boolean);
                 for (const tk of tokens) {
                   if (isBranchName(tk)) {
@@ -949,13 +987,16 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
                   </div>
                 )}
                 {allBranchGroups.length > 0 && (
-                  <div className="rounded-lg border border-brand/30 bg-brand/5 p-3.5">
-                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5 mb-3">
-                      <span className="h-2 w-2 rounded-full bg-brand inline-block" />
-                      Branches de Entrega
-                      <span className="ml-auto text-xs font-normal text-muted-foreground">{totalBranches} branch{totalBranches !== 1 ? 'es' : ''}</span>
-                    </h3>
-                    <div className="space-y-2.5">
+                  <Collapsible defaultOpen={false} className="rounded-lg border border-brand/30 bg-brand/5 p-3.5 group">
+                    <CollapsibleTrigger className="flex w-full items-center justify-between hover:opacity-80 transition-opacity">
+                      <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-brand inline-block" />
+                        Branches de Entrega
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">{totalBranches} branch{totalBranches !== 1 ? 'es' : ''}</span>
+                      </h3>
+                      <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="pt-3 space-y-2.5">
                       {allBranchGroups.map((group, gi) => (
                         <div key={gi}>
                           {allBranchGroups.length > 1 && (
@@ -983,8 +1024,8 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
                           </div>
                         </div>
                       ))}
-                    </div>
-                  </div>
+                    </CollapsibleContent>
+                  </Collapsible>
                 )}
               </>
             );
@@ -993,7 +1034,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
           {type === 'case' && 'steps' in item && (() => {
             const rawBranches = (item as any).branches?.toString().trim() || '';
             const isValidBranchToken = (s: string) => !!s && s.length >= 3 && s.length <= 100
-              && !/\*\*/.test(s) && /^[\w\-\/\.\u00C0-\u017F]+$/.test(s);
+              && !/\*\*/.test(s) && /^[\w-/.À-ú]+$/.test(s);
             const branchTokens = rawBranches.split(/[\s,;]+/).map((b: string) => b.trim()).filter(isValidBranchToken);
             return (
             <div className="space-y-4">
@@ -1060,66 +1101,10 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
                   {renderListOrParagraph(item.actual_result)}
                 </div>
               )}
-              {(executor || item.executed_by) && (
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground mb-1.5">Executado por</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {executor?.display_name || executor?.email || item.executed_by}
-                  </p>
-                </div>
-              )}
             </div>
           )}
 
-          {/* Imagens de branches — apenas quando geração IA está disponível */}
-          {false && type === 'case' && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-                  <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                  Imagens de Referência
-                </h3>
-                <label className="flex items-center gap-1.5 cursor-pointer text-xs text-muted-foreground hover:text-foreground border border-border/60 rounded-md px-2.5 py-1.5 transition-colors">
-                  {loadingBranch ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                  {branchFile ? <span className="max-w-[140px] truncate">{branchFile.name}</span> : 'Importar documento'}
-                  <input type="file" className="sr-only" accept=".pptx,.pdf,.docx,.doc" onChange={handleBranchFileChange} disabled={loadingBranch} />
-                </label>
-              </div>
-              {branchImages.length > 0 ? (
-                <div className="space-y-2">
-                  <div className="flex flex-wrap gap-2 p-2 bg-muted/30 rounded-md border border-border/40 max-h-48 overflow-y-auto">
-                    {branchImages.map((img, idx) => (
-                      <div key={idx} className="relative flex-shrink-0">
-                        <img
-                          src={img.dataUrl}
-                          alt={`Ref ${idx + 1}`}
-                          className="h-20 w-28 object-cover rounded border border-border/60 cursor-pointer hover:opacity-90 transition-opacity"
-                          title={img.name}
-                          onClick={() => window.open(img.dataUrl, '_blank')}
-                        />
-                        <span className="absolute top-1 left-1 h-4 w-4 bg-brand text-white text-[10px] rounded-full flex items-center justify-center font-mono">
-                          {idx + 1}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <p className="text-[10px] text-muted-foreground">
-                      {branchImages.length} imagem(ns) — clique para ampliar. Serão enviadas para a IA na geração de casos.
-                    </p>
-                    <button type="button" onClick={() => { setBranchImages([]); setBranchFile(null); }}
-                      className="text-xs text-muted-foreground hover:text-destructive flex items-center gap-0.5 transition-colors">
-                      <X className="h-3 w-3" /> Limpar
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground italic">
-                  Importe um documento com imagens de referência para usá-las na geração de casos com IA.
-                </p>
-              )}
-            </div>
-          )}
+
 
           {/* Vínculos para requisito — casos vinculados */}
           {type === 'requirement' && linkedCases.length > 0 && (
@@ -1193,6 +1178,7 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
               </div>
             </div>
           )}
+
         </div>
 
         <hr className="border-border" />
@@ -1232,12 +1218,25 @@ export const DetailModal = ({ isOpen, onClose, item, type, onEdit, onDelete }: D
       </DialogContent>
     </Dialog>
 
-    {/* Modal de Perfil do Autor */}
     <UserProfileModal
       isOpen={showAuthorModal}
       onClose={() => setShowAuthorModal(false)}
       userId={author?.id || (item as any).user_id}
       initialProfile={author || undefined}
+    />
+
+    <UserProfileModal
+      isOpen={showAssignedModal}
+      onClose={() => setShowAssignedModal(false)}
+      userId={assignedUser?.id || (item as any).assigned_to}
+      initialProfile={assignedUser || undefined}
+    />
+
+    <UserProfileModal
+      isOpen={showExecutorModal}
+      onClose={() => setShowExecutorModal(false)}
+      userId={executor?.id || (item as any).executed_by}
+      initialProfile={executor || undefined}
     />
 
     <AlertDialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>

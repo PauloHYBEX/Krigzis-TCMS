@@ -90,6 +90,15 @@ export const AIGenerator = () => {
 
   const handleGenerationSuccess = (data: unknown) => {
     setShowForm(false);
+    
+    if (data === null) {
+      // Background task started, just redirect to the list view so the user doesn't stay on the generator page
+      if (generationType === 'plan') navigate('/plans');
+      else if (generationType === 'case') navigate('/cases');
+      else navigate('/executions');
+      return;
+    }
+
     if (batchMode === 'batch' && (generationType === 'plan' || generationType === 'case')) {
       // Para geração em lote, abrir o modal de revisão
       if (isBatchPayload(data)) {

@@ -2,6 +2,24 @@
 
 Todas as mudanças notáveis neste projeto são documentadas aqui.
 
+## 2026-05 — Refactor de Segurança, Performance e Qualidade
+
+- security: JWT secret com validação de tamanho mínimo (32 chars) no boot; sem fallback inseguro em produção
+- security: CORS restrito via `ALLOWED_ORIGINS` no `.env`; headers de segurança adicionados (`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `X-XSS-Protection`)
+- security: Rate limiting em `/api/auth/*` (10 req / 15 min via `express-rate-limit`)
+- security(api-keys): API keys de LLMs migradas de `localStorage` para backend criptografado (AES-256-GCM, tabela `api_keys`); endpoints `/api/ai/keys` com scoping por usuário
+- perf: Índices SQLite adicionados para notificações, defeitos, rastreabilidade e casos por status
+- perf: Polling de notificações otimizado para 10 s com pausa automática quando aba está oculta (`visibilitychange`)
+- perf: Lazy loading de rotas pesadas com `React.lazy` + `Suspense`, reduzindo bundle inicial
+- validation: Schemas Zod em `src/lib/schemas.ts` para validação no frontend
+- validation: Validação de payload e state machine de status (defects/requirements) no endpoint `/api/db/mutate`
+- chore(cleanup): Removido `supabase/`, `context/`, `bun.lockb`, `apps/ai/`, scripts legados
+- chore(cleanup): Removidas dependências não utilizadas: `firebase`, `@types/jspdf`, `@supabase/supabase-js`
+- chore(cleanup): Removido `assets/` (ferramentas de geração de ícones, já em `public/`)
+- chore(cleanup): Removido `public/design/` (pasta vazia de mockups)
+- docs: Guias atualizados para refletir stack atual (SQLite/Express, sem Supabase)
+- test: Smoke tests do Playwright reescritos — healthcheck, login UI, redirect, auth 401
+
 ## 2025-09-12 — Integrações de Defeitos e Indicadores na Matriz
 
 - feat(traceability): indicadores compactos na Matriz

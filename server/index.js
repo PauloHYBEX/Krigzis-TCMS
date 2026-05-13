@@ -1,4 +1,4 @@
-﻿import fs from 'fs/promises';
+import fs from 'fs/promises';
 import path from 'path';
 import express from 'express';
 import cors from 'cors';
@@ -9,9 +9,10 @@ import multer from 'multer';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { createRequire } from 'module';
-import { getClient, db, query } from './db.js';
+import { getClient, db, query, transaction } from './db.js';
 import { encrypt as encryptSecret, decrypt as decryptSecret } from './lib/crypto.js';
-import { validateRow, canTransitionDefect, canTransitionRequirement } from './lib/validation.js';
+import { validateRow, canTransitionDefect, canTransitionRequirement, canTransitionRun } from './lib/validation.js';
+import { logger } from './lib/logger.js';
 import JSZip from 'jszip';
 import { DOMParser } from '@xmldom/xmldom';
 import mammoth from 'mammoth';
@@ -25,6 +26,8 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 const uploadsDir = path.join(rootDir, 'public', 'uploads');
 
+const SEQ_TABLES = new Set(['test_plans', 'test_cases', 'test_executions', 'test_runs', 'requirements', 'defects']);
+
 // Validação do segredo JWT — obrigatório e forte em producao
 const IS_PROD = process.env.NODE_ENV === 'production';
 const RAW_SECRET = process.env.LOCAL_AUTH_SECRET;
@@ -33,17 +36,17 @@ const WEAK_SECRETS = new Set(['nexus-local-secret', 'change-me', 'secret', 'chan
 
 if (!RAW_SECRET) {
   if (IS_PROD) {
-    console.error('[security] LOCAL_AUTH_SECRET nao definido. Abortando em producao.');
+    logger.error('[security] LOCAL_AUTH_SECRET nao definido. Abortando em producao.');
     process.exit(1);
   } else {
-    console.warn('[security] LOCAL_AUTH_SECRET nao definido. Usando segredo de desenvolvimento temporario.');
+    logger.warn('[security] LOCAL_AUTH_SECRET nao definido. Usando segredo de desenvolvimento temporario.');
   }
 } else if (RAW_SECRET.length < MIN_SECRET_LEN || WEAK_SECRETS.has(RAW_SECRET)) {
   if (IS_PROD) {
-    console.error('[security] LOCAL_AUTH_SECRET fraco (<' + MIN_SECRET_LEN + ' chars ou padrao conhecido). Abortando.');
+    logger.error('[security] LOCAL_AUTH_SECRET fraco (<' + MIN_SECRET_LEN + ' chars ou padrao conhecido). Abortando.');
     process.exit(1);
   } else {
-    console.warn('[security] LOCAL_AUTH_SECRET fraco. Gere um novo com: openssl rand -hex 32');
+    logger.warn('[security] LOCAL_AUTH_SECRET fraco. Gere um novo com: openssl rand -hex 32');
   }
 }
 
@@ -55,7 +58,11 @@ await fs.mkdir(uploadsDir, { recursive: true });
 const app = express();
 
 // CORS com allowlist configuravel via ALLOWED_ORIGINS (separadas por virgula)
-const DEFAULT_ORIGINS = ['http://localhost:8080', 'http://localhost:5173', 'http://127.0.0.1:8080'];
+const DEFAULT_ORIGINS = [
+  'http://localhost:8080', 'http://localhost:5173', 'http://localhost:5174',
+  'http://localhost:5175', 'http://127.0.0.1:8080', 'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+];
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || DEFAULT_ORIGINS.join(','))
   .split(',').map((o) => o.trim()).filter(Boolean);
 
@@ -124,16 +131,16 @@ const upload = multer({ storage });
 
 const ALLOWED_TABLES = new Set([
   'profiles', 'user_permissions', 'projects', 'test_plans', 'test_cases',
-  'test_executions', 'requirements', 'requirements_cases', 'defects',
+  'test_executions', 'test_runs', 'requirements', 'requirements_cases', 'defects',
   'activity_logs', 'user_settings', 'notifications', 'notification_preferences',
   'profile_function_roles', 'role_requests',
 ]);
 
 const BOOL_PERM_COLS = [
-  'can_manage_users','can_manage_projects','can_delete_projects','can_manage_plans',
-  'can_manage_cases','can_manage_executions','can_view_reports','can_use_ai',
-  'can_access_model_control','can_access_admin_menu','can_configure_ai_models',
-  'can_test_ai_connections','can_manage_ai_templates','can_select_ai_models',
+  'can_manage_users', 'can_manage_projects', 'can_delete_projects', 'can_manage_plans',
+  'can_manage_cases', 'can_manage_executions', 'can_view_reports', 'can_use_ai',
+  'can_access_model_control', 'can_access_admin_menu', 'can_configure_ai_models',
+  'can_test_ai_connections', 'can_manage_ai_templates', 'can_select_ai_models',
 ];
 
 function signToken(user) {
@@ -150,8 +157,22 @@ function parseToken(req) {
 async function getCurrentUser(req) {
   const payload = parseToken(req);
   if (!payload?.sub) return null;
-  const { rows } = query('SELECT id, email, display_name, role, avatar_url, active FROM profiles WHERE id = ? AND active = 1', [payload.sub]);
-  return rows[0] || null;
+  const cols = ['id', 'email', 'display_name', 'role', 'avatar_url', 'active', ...BOOL_PERM_COLS];
+  const { rows } = query(`
+    SELECT p.id, p.email, p.display_name, p.role, p.avatar_url, p.active,
+           ${BOOL_PERM_COLS.map(c => `up.${c}`).join(', ')}
+    FROM profiles p
+    LEFT JOIN user_permissions up ON p.id = up.user_id
+    WHERE p.id = ? AND p.active = 1
+  `, [payload.sub]);
+  if (!rows[0]) return null;
+  const user = rows[0];
+  const permissions = {};
+  for (const col of BOOL_PERM_COLS) {
+    permissions[col] = user[col] === 1 || user[col] === true;
+  }
+  user.permissions = permissions;
+  return user;
 }
 
 async function requireUser(req, res, next) {
@@ -219,6 +240,9 @@ function normalizeRows(table, rows) {
       steps: typeof row.steps === 'string'
         ? (() => { try { return JSON.parse(row.steps); } catch { return []; } })()
         : (Array.isArray(row.steps) ? row.steps : []),
+      interested_users: typeof row.interested_users === 'string'
+        ? (() => { try { return JSON.parse(row.interested_users); } catch { return []; } })()
+        : (Array.isArray(row.interested_users) ? row.interested_users : []),
     }));
   }
   if (table === 'activity_logs') {
@@ -229,21 +253,35 @@ function normalizeRows(table, rows) {
         : (row.metadata && typeof row.metadata === 'object' ? row.metadata : {}),
     }));
   }
-  return rows;
+  // Universal: parse interested_users if it exists as string
+  return rows.map((row) => {
+    if (typeof row.interested_users === 'string') {
+      try {
+        row.interested_users = JSON.parse(row.interested_users);
+      } catch {
+        row.interested_users = [];
+      }
+    }
+    return row;
+  });
 }
 
 function serializeForDb(table, values) {
   if (!values) return values;
-  if (table === 'test_cases' && Array.isArray(values.steps)) {
-    return { ...values, steps: JSON.stringify(values.steps) };
+  let result = { ...values };
+  if (table === 'test_cases' && Array.isArray(result.steps)) {
+    result.steps = JSON.stringify(result.steps);
   }
-  if (table === 'profiles' && Array.isArray(values.tags)) {
-    return { ...values, tags: JSON.stringify(values.tags) };
+  if (table === 'profiles' && Array.isArray(result.tags)) {
+    result.tags = JSON.stringify(result.tags);
   }
-  if (table === 'activity_logs' && values.metadata && typeof values.metadata === 'object') {
-    return { ...values, metadata: JSON.stringify(values.metadata) };
+  if (table === 'activity_logs' && result.metadata && typeof result.metadata === 'object') {
+    result.metadata = JSON.stringify(result.metadata);
   }
-  return values;
+  if (Array.isArray(result.interested_users)) {
+    result.interested_users = JSON.stringify(result.interested_users);
+  }
+  return result;
 }
 
 const _tableColsCache = new Map();
@@ -258,12 +296,32 @@ function getTableCols(table) {
 }
 function filterToTableCols(table, obj) {
   const allowed = getTableCols(table);
-  if (!allowed.size) return obj;
-  const out = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (allowed.has(k)) out[k] = v;
+  const result = {};
+  for (const key of Object.keys(obj)) {
+    if (allowed.has(key)) result[key] = obj[key];
   }
-  return out;
+  return result;
+}
+
+/**
+ * Retorna o próximo número de sequência disponível para uma tabela e projeto.
+ * Se múltiplos itens forem inseridos, deve-se incrementar o retorno manualmente.
+ */
+function getNextSequence(table, projectId = null) {
+  if (!SEQ_TABLES.has(table)) return null;
+  const tableCols = getTableCols(table);
+  const hasProjectCol = tableCols.has('project_id');
+  let seqSql = `SELECT MAX(sequence) as maxSeq FROM ${table} WHERE sequence IS NOT NULL`;
+  const seqParams = [];
+  if (hasProjectCol && projectId) {
+    seqSql += ' AND project_id = ?';
+    seqParams.push(projectId);
+  } else if (hasProjectCol) {
+    seqSql += ' AND project_id IS NULL';
+  }
+  const { rows: seqRows } = query(seqSql, seqParams);
+  const max = Number(seqRows[0]?.maxSeq) || 0;
+  return max + 1;
 }
 
 // Auto-migrate existing databases: add columns that may be missing
@@ -296,12 +354,18 @@ function filterToTableCols(table, obj) {
     'ALTER TABLE test_plans ADD COLUMN branches TEXT DEFAULT \'\'',
     'ALTER TABLE test_cases ADD COLUMN branches TEXT DEFAULT \'\'',
     'ALTER TABLE notifications ADD COLUMN link TEXT DEFAULT \'\'',
+    'ALTER TABLE test_cases ADD COLUMN assigned_to TEXT REFERENCES profiles(id)',
+    'ALTER TABLE test_executions ADD COLUMN assigned_to TEXT REFERENCES profiles(id)',
+    'ALTER TABLE test_cases ADD COLUMN interested_users TEXT DEFAULT \'[]\'',
+    'ALTER TABLE test_executions ADD COLUMN interested_users TEXT DEFAULT \'[]\'',
+    'ALTER TABLE defects ADD COLUMN interested_users TEXT DEFAULT \'[]\'',
+    'ALTER TABLE test_plans ADD COLUMN interested_users TEXT DEFAULT \'[]\'',
   ];
   for (const sql of migrations) {
     try { db.exec(sql); } catch (e) {
       // Ignore 'duplicate column name' errors but log unexpected ones
       if (!String(e?.message).includes('duplicate column') && !String(e?.message).includes('already exists')) {
-        console.warn('[migration skip]', String(e?.message).slice(0, 120), '|', sql.slice(0, 80));
+        logger.warn('[migration skip]', String(e?.message).slice(0, 120), '|', sql.slice(0, 80));
       }
     }
   }
@@ -333,9 +397,38 @@ function filterToTableCols(table, obj) {
       updated_at TEXT DEFAULT (datetime('now')),
       PRIMARY KEY (user_id, provider, model_id)
     )`,
+    `CREATE TABLE IF NOT EXISTS test_runs (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      status TEXT DEFAULT 'planned' CHECK(status IN ('planned','in_progress','completed','aborted')),
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      plan_id TEXT REFERENCES test_plans(id) ON DELETE SET NULL,
+      assigned_to TEXT REFERENCES profiles(id),
+      starts_at TEXT,
+      ends_at TEXT,
+      created_by TEXT REFERENCES profiles(id),
+      sequence INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )`,
   ];
   for (const sql of extraTables) {
     try { db.exec(sql); } catch { /* already exists */ }
+  }
+
+  // Migracoes tardias (apos criar tabelas dependentes)
+  const lateMigrations = [
+    'ALTER TABLE test_executions ADD COLUMN run_id TEXT REFERENCES test_runs(id) ON DELETE SET NULL',
+    // role_requests: renomear requested_role (singular, NOT NULL) → requested_roles (plural, JSON array)
+    'ALTER TABLE role_requests ADD COLUMN requested_roles TEXT DEFAULT \'[]\'',
+  ];
+  for (const sql of lateMigrations) {
+    try { db.exec(sql); } catch (e) {
+      if (!String(e?.message).includes('duplicate column') && !String(e?.message).includes('already exists')) {
+        logger.warn('[late-migration skip]', String(e?.message).slice(0, 120));
+      }
+    }
   }
 
   // Indices de performance (idempotentes)
@@ -348,11 +441,15 @@ function filterToTableCols(table, obj) {
     'CREATE INDEX IF NOT EXISTS idx_requirements_cases_req ON requirements_cases(requirement_id)',
     'CREATE INDEX IF NOT EXISTS idx_requirements_cases_case ON requirements_cases(case_id)',
     'CREATE INDEX IF NOT EXISTS idx_test_cases_project_status ON test_cases(project_id, status)',
+    'CREATE INDEX IF NOT EXISTS idx_test_runs_project ON test_runs(project_id)',
+    'CREATE INDEX IF NOT EXISTS idx_test_runs_plan ON test_runs(plan_id)',
+    'CREATE INDEX IF NOT EXISTS idx_test_runs_status ON test_runs(status)',
+    'CREATE INDEX IF NOT EXISTS idx_executions_run ON test_executions(run_id)',
   ];
   for (const sql of perfIndexes) {
     try { db.exec(sql); } catch (e) {
       if (!String(e?.message).includes('already exists')) {
-        console.warn('[index skip]', String(e?.message).slice(0, 120));
+        logger.warn('[index skip]', String(e?.message).slice(0, 120));
       }
     }
   }
@@ -444,17 +541,72 @@ app.post('/api/db/mutate', requireUser, async (req, res, next) => {
   try {
     const { table, action, values, filters = [], options = {} } = req.body || {};
     if (!ALLOWED_TABLES.has(table)) return res.status(400).json({ error: { message: 'Tabela nao permitida.' } });
+
+    // --- SECURITY: RBAC & Anti-Privilege Escalation ---
+    const { role: userRole, id: userId } = req.user;
+
+    // Prevent modifying other users' personal data (IDOR mitigation)
+    const personalTables = ['api_keys', 'user_settings', 'notification_preferences', 'role_requests', 'activity_logs'];
+    if (personalTables.includes(table)) {
+      const isArrayValues = Array.isArray(values);
+      const rowsToCheck = isArrayValues ? values : (values ? [values] : []);
+      for (const r of rowsToCheck) {
+        if (r.user_id && r.user_id !== userId && userRole !== 'master' && userRole !== 'admin') {
+          return res.status(403).json({ error: { message: 'Acesso negado: Tentativa de IDOR em dados de outro usuário.' } });
+        }
+      }
+      const filterUserId = filters.find(f => f.column === 'user_id')?.value;
+      if (filterUserId && filterUserId !== userId && userRole !== 'master' && userRole !== 'admin') {
+        return res.status(403).json({ error: { message: 'Acesso negado: Tentativa de IDOR em dados de outro usuário via filtro.' } });
+      }
+    }
+
+    if (userRole === 'viewer') {
+      if (!personalTables.includes(table)) {
+        if (table === 'profiles' && action === 'update' && filters.some(f => f.column === 'id' && f.value === userId)) {
+          if (values?.role) return res.status(403).json({ error: { message: 'Permissão negada: Escalação de privilégio.' } });
+        } else {
+          return res.status(403).json({ error: { message: 'Permissão negada: Perfil viewer não pode alterar esta tabela.' } });
+        }
+      }
+    }
+
+    if (userRole !== 'master' && userRole !== 'admin') {
+      const perms = req.user.permissions || {};
+      if (table === 'projects' && action === 'delete' && !perms.can_delete_projects) {
+        return res.status(403).json({ error: { message: 'Permissão negada: can_delete_projects.' } });
+      }
+      if (table === 'projects' && (action === 'insert' || action === 'update') && !perms.can_manage_projects) {
+        return res.status(403).json({ error: { message: 'Permissão negada: can_manage_projects.' } });
+      }
+      if ((table === 'test_plans' || table === 'requirements') && !perms.can_manage_plans) {
+        return res.status(403).json({ error: { message: 'Permissão negada: can_manage_plans.' } });
+      }
+      if (table === 'test_cases' && !perms.can_manage_cases) {
+        return res.status(403).json({ error: { message: 'Permissão negada: can_manage_cases.' } });
+      }
+      if ((table === 'test_executions' || table === 'test_runs' || table === 'defects') && !perms.can_manage_executions) {
+        return res.status(403).json({ error: { message: 'Permissão negada: can_manage_executions.' } });
+      }
+    }
+
+    if (table === 'profiles' && values?.role && userRole !== 'master' && userRole !== 'admin') {
+      return res.status(403).json({ error: { message: 'Acesso negado: Apenas administradores podem alterar roles.' } });
+    }
+    if (table === 'user_permissions' && userRole !== 'master' && userRole !== 'admin') {
+      return res.status(403).json({ error: { message: 'Acesso negado: Apenas administradores podem alterar permissões.' } });
+    }
+    // --- END SECURITY ---
     const client = getClient();
     try {
       let result;
-      const SEQ_TABLES = new Set(['test_plans', 'test_cases', 'test_executions', 'requirements', 'defects']);
       if (action === 'insert' || action === 'upsert') {
         const rawRows = Array.isArray(values) ? values : [values];
         if (!rawRows.length) return res.json({ data: [], error: null });
 
         // Validacao por linha (bloqueia em caso de payload invalido)
         for (const r of rawRows) {
-          const err = validateRow(table, r, { isUpdate: false });
+          const err = validateRow(table, r, { isUpdate: false, db: client });
           if (err) return res.status(400).json({ error: { message: `Validacao (${table}): ${err}` } });
         }
 
@@ -471,32 +623,22 @@ app.post('/api/db/mutate', requireUser, async (req, res, next) => {
         let nextSeq = null; // inicializado na 1ª linha sem sequence para evitar duplicatas em lote
         const rows = rawRows.map((row) => {
           const r = serializeForDb(table, row);
+
+          // Auto-populacao de project_id para test_cases e test_executions se estiver faltando mas existir plan_id
+          if ((table === 'test_cases' || table === 'test_executions' || table === 'defects') && !r.project_id && r.plan_id) {
+            const { rows: pRows } = query('SELECT project_id FROM test_plans WHERE id = ?', [r.plan_id]);
+            if (pRows.length) r.project_id = pRows[0].project_id;
+          }
+
           const base = r.id ? r : { id: randomUUID(), ...r };
           const filtered = filterToTableCols(table, base);
-          if (SEQ_TABLES.has(table) && filtered.sequence == null) {
+          if (filtered.sequence == null) {
             if (nextSeq === null) {
-              // Sequencia por PROJETO — se a tabela tem project_id e o row tambem,
-              // filtra para que cada projeto tenha sua propria numeracao comecando em 1
-              const tableCols = getTableCols(table);
-              const hasProjectCol = tableCols.has('project_id');
-              const projectId = filtered.project_id || null;
-              let seqSql = `SELECT sequence FROM ${table} WHERE sequence IS NOT NULL`;
-              const seqParams = [];
-              if (hasProjectCol && projectId) {
-                seqSql += ' AND project_id = ?';
-                seqParams.push(projectId);
-              } else if (hasProjectCol) {
-                // Row sem project_id em tabela com project_id: so conta outros sem project_id
-                seqSql += ' AND project_id IS NULL';
-              }
-              seqSql += ' ORDER BY sequence ASC';
-              const { rows: seqRows } = query(seqSql, seqParams);
-              const existing = new Set(seqRows.map(r => Number(r.sequence)).filter(n => Number.isFinite(n) && n > 0));
-              let candidate = 1;
-              while (existing.has(candidate)) candidate++;
-              nextSeq = candidate;
+              nextSeq = getNextSequence(table, filtered.project_id);
             }
-            filtered.sequence = nextSeq++;
+            if (nextSeq !== null) {
+              filtered.sequence = nextSeq++;
+            }
           }
           return filtered;
         });
@@ -508,15 +650,15 @@ app.post('/api/db/mutate', requireUser, async (req, res, next) => {
         const updateCols = cols.filter((c) => !conflictCols.includes(c));
         const onConflict = options?.onConflict
           ? (updateCols.length > 0
-              ? ' ON CONFLICT (' + conflictCols.join(', ') + ') DO UPDATE SET ' + updateCols.map((c) => c + ' = excluded.' + c).join(', ')
-              : ' ON CONFLICT (' + conflictCols.join(', ') + ') DO NOTHING')
+            ? ' ON CONFLICT (' + conflictCols.join(', ') + ') DO UPDATE SET ' + updateCols.map((c) => c + ' = excluded.' + c).join(', ')
+            : ' ON CONFLICT (' + conflictCols.join(', ') + ') DO NOTHING')
           : '';
         // better-sqlite3: inserir cada row individualmente para evitar
         // desalinhamento de parâmetros em batch com colunas heterogêneas
         const allInserted = [];
         for (const row of rows) {
           const rowParams = [];
-          const placeholders = cols.map((col) => { rowParams.push(row[col] !== undefined ? row[col] : null); return '?' ; });
+          const placeholders = cols.map((col) => { rowParams.push(row[col] !== undefined ? row[col] : null); return '?'; });
           const sql = 'INSERT INTO ' + table + ' (' + cols.join(', ') + ') VALUES (' + placeholders.join(', ') + ')' + (action === 'upsert' ? onConflict : '') + ' RETURNING *';
           const r = client.query(sql, rowParams);
           allInserted.push(...(r.rows || []));
@@ -527,13 +669,15 @@ app.post('/api/db/mutate', requireUser, async (req, res, next) => {
         const errV = validateRow(table, values, { isUpdate: true });
         if (errV) return res.status(400).json({ error: { message: `Validacao (${table}): ${errV}` } });
 
-        // State machine: bloqueia transicoes invalidas em defects/requirements
-        if ((table === 'defects' || table === 'requirements') && values?.status) {
+        // State machine: bloqueia transicoes invalidas em defects/requirements/test_runs
+        if ((table === 'defects' || table === 'requirements' || table === 'test_runs') && values?.status) {
           // Busca registro(s) afetado(s) para comparar status atual
           const preParams = [];
           const preWhere = buildWhere(filters, preParams);
           const { rows: preRows } = query('SELECT id, status FROM ' + table + preWhere, preParams);
-          const checker = table === 'defects' ? canTransitionDefect : canTransitionRequirement;
+          const checker = table === 'defects' ? canTransitionDefect
+            : table === 'requirements' ? canTransitionRequirement
+              : canTransitionRun;
           for (const r of preRows) {
             if (!checker(r.status, values.status)) {
               return res.status(400).json({
@@ -546,6 +690,9 @@ app.post('/api/db/mutate', requireUser, async (req, res, next) => {
         const allowed = getTableCols(table);
         const entries = Object.entries(serializeForDb(table, values) || {})
           .filter(([key]) => !allowed.size || allowed.has(key));
+        if (!entries.length) {
+          return res.status(400).json({ error: { message: `Nenhum campo valido para atualizar em '${table}'.` } });
+        }
         const params = [];
         const setSql = entries.map(([key, val]) => { params.push(val); return key + ' = \$' + params.length; }).join(', ');
         const whereSql = buildWhere(filters, params);
@@ -561,6 +708,153 @@ app.post('/api/db/mutate', requireUser, async (req, res, next) => {
     } finally {
       client.release();
     }
+  } catch (error) { next(error); }
+});
+
+app.post('/api/mutate/unified', requireUser, (req, res, next) => {
+  const { plan, cases } = req.body;
+  if (!plan || !plan.project_id) {
+    return res.status(400).json({ error: { message: 'Plano e project_id sao obrigatorios.' } });
+  }
+
+  // Permissao Viewer: bloqueia mutacoes
+  if (req.user.role === 'viewer') {
+    return res.status(403).json({ error: { message: 'Permissão negada: Visualizadores não podem criar planos.' } });
+  }
+
+  try {
+    const result = transaction(() => {
+      // 1. Criar o Plano
+      const planId = plan.id || randomUUID();
+      const planRow = filterToTableCols('test_plans', {
+        ...serializeForDb('test_plans', plan),
+        id: planId,
+        user_id: req.user.id,
+        sequence: getNextSequence('test_plans', plan.project_id),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+
+      const pCols = Object.keys(planRow);
+      const pVals = Object.values(planRow);
+      const pSql = `INSERT INTO test_plans (${pCols.join(',')}) VALUES (${pCols.map(() => '?').join(',')}) RETURNING *`;
+      const planResult = query(pSql, pVals).rows[0];
+
+      // 2. Criar os Casos
+      const caseResults = [];
+      if (Array.isArray(cases)) {
+        let nextCaseSeq = getNextSequence('test_cases', plan.project_id);
+        for (const c of cases) {
+          const caseRow = filterToTableCols('test_cases', {
+            ...serializeForDb('test_cases', c),
+            id: c.id || randomUUID(),
+            plan_id: planId,
+            project_id: plan.project_id,
+            user_id: req.user.id,
+            sequence: nextCaseSeq++,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+          const cCols = Object.keys(caseRow);
+          const cVals = Object.values(caseRow);
+          const cSql = `INSERT INTO test_cases (${cCols.join(',')}) VALUES (${cCols.map(() => '?').join(',')}) RETURNING *`;
+          const cRes = query(cSql, cVals).rows[0];
+          caseResults.push(cRes);
+        }
+      }
+
+      return { plan: planResult, cases: caseResults };
+    })();
+
+    res.json({
+      data: {
+        plan: normalizeRows('test_plans', [result.plan])[0],
+        cases: normalizeRows('test_cases', result.cases)
+      },
+      error: null
+    });
+  } catch (error) {
+    logger.error('[api] Erro na mutação unificada:', error.message);
+    res.status(500).json({ error: { message: 'Erro ao salvar fluxo unificado.' } });
+  }
+});
+
+// Relatorio agregado para o Dashboard (Otimizacao T02)
+app.get('/api/reports/dashboard', requireUser, (req, res, next) => {
+  try {
+    const projectId = req.query.project_id;
+    const userId = req.user.id;
+
+    const whereProject = projectId ? 'WHERE project_id = ?' : '';
+    const params = projectId ? [projectId] : [];
+
+    // 1. Overview counts
+    const overview = {
+      totalPlans: Number(query(`SELECT COUNT(*) as count FROM test_plans ${whereProject}`, params).rows[0].count),
+      totalCases: Number(query(`SELECT COUNT(*) as count FROM test_cases ${whereProject}`, params).rows[0].count),
+      totalExecutions: Number(query(`SELECT COUNT(*) as count FROM test_executions ${whereProject}`, params).rows[0].count),
+      totalRequirements: Number(query(`SELECT COUNT(*) as count FROM requirements ${whereProject}`, params).rows[0].count),
+      totalDefects: Number(query(`SELECT COUNT(*) as count FROM defects ${whereProject} ${projectId ? 'AND' : 'WHERE'} status != 'closed'`, params).rows[0].count),
+      aiGenerated: Number(query(`SELECT COUNT(*) as count FROM test_cases ${whereProject} ${projectId ? 'AND' : 'WHERE'} generated_by_ai = 1`, params).rows[0].count) +
+        Number(query(`SELECT COUNT(*) as count FROM test_plans ${whereProject} ${projectId ? 'AND' : 'WHERE'} generated_by_ai = 1`, params).rows[0].count)
+    };
+
+    // 2. Execution distribution
+    const execStats = query(`SELECT status, COUNT(*) as count FROM test_executions ${whereProject} GROUP BY status`, params).rows;
+
+    // 3. Defect distribution
+    const defectStats = query(`SELECT status, severity, COUNT(*) as count FROM defects ${whereProject} GROUP BY status, severity`, params).rows;
+
+    // 4. Progress by plan (top 5)
+    const planProgress = query(`
+      SELECT 
+        p.id, p.title, p.sequence, p.updated_at,
+        (SELECT COUNT(*) FROM test_cases WHERE plan_id = p.id) as case_count,
+        (SELECT COUNT(*) FROM test_executions WHERE plan_id = p.id) as exec_count
+      FROM test_plans p
+      ${whereProject}
+      ORDER BY p.updated_at DESC
+      LIMIT 10
+    `, params).rows;
+
+    // 5. Recent items (combined)
+    // Para simplificar e manter performance, pegamos os ultimos de cada e unimos no JS
+    const recentPlans = query(`SELECT id, title, updated_at, generated_by_ai FROM test_plans ${whereProject} ORDER BY updated_at DESC LIMIT 5`, params).rows.map(r => ({ ...r, type: 'plan' }));
+    const recentCases = query(`SELECT id, title, updated_at, generated_by_ai FROM test_cases ${whereProject} ORDER BY updated_at DESC LIMIT 5`, params).rows.map(r => ({ ...r, type: 'case' }));
+    const recentExecs = query(`SELECT id, 'Execução #' || substr(id, 1, 6) as title, executed_at as updated_at FROM test_executions ${whereProject} ORDER BY executed_at DESC LIMIT 5`, params).rows.map(r => ({ ...r, type: 'execution' }));
+
+    res.json({
+      overview,
+      execStats,
+      defectStats,
+      planProgress,
+      recent: [...recentPlans, ...recentCases, ...recentExecs].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 10)
+    });
+  } catch (error) { next(error); }
+});
+
+// Progresso agregado de um test_run: contagem por status de execucoes vinculadas
+app.get('/api/runs/:id/progress', requireUser, (req, res, next) => {
+  try {
+    const runId = String(req.params.id || '');
+    if (!runId) return res.status(400).json({ error: { message: 'run id obrigatorio' } });
+    const { rows: runRows } = query('SELECT id, title, status, project_id, plan_id FROM test_runs WHERE id = ?', [runId]);
+    const run = runRows[0];
+    if (!run) return res.status(404).json({ error: { message: 'Run nao encontrado.' } });
+    const { rows } = query(
+      "SELECT status, COUNT(*) AS count FROM test_executions WHERE run_id = ? GROUP BY status",
+      [runId]
+    );
+    const totals = { passed: 0, failed: 0, blocked: 0, not_tested: 0, total: 0 };
+    for (const r of rows) {
+      const s = String(r.status || '');
+      const n = Number(r.count) || 0;
+      if (s in totals) totals[s] = n;
+      totals.total += n;
+    }
+    const completionRate = totals.total > 0 ? (totals.passed + totals.failed + totals.blocked) / totals.total : 0;
+    const passRate = (totals.passed + totals.failed) > 0 ? totals.passed / (totals.passed + totals.failed) : 0;
+    res.json({ data: { run, totals, completionRate, passRate }, error: null });
   } catch (error) { next(error); }
 });
 
@@ -621,24 +915,31 @@ app.post('/api/reports/aggregate', requireUser, async (req, res, next) => {
         : [];
       const caseMap = new Map(caseRows.map((r) => [r.id, r.title]));
       const planMap = new Map(planRows.map((r) => [r.id, r.title]));
-      return res.json({ type, generatedAt: new Date().toISOString(), data: {
-        totals: { totalExecutions: rows.length, failedExecutions: failed.length, failureRate: rows.length ? failed.length / rows.length : 0, lastFailedAt: failed[0]?.executed_at || null },
-        topCases: caseIds.map((id) => ({ id, title: caseMap.get(id) || id, count: caseCount.get(id) })).sort((a, b) => b.count - a.count).slice(0, 20),
-        topPlans: planIds.map((id) => ({ id, title: planMap.get(id) || id, count: planCount.get(id) })).sort((a, b) => b.count - a.count).slice(0, 20),
-      }});
+      return res.json({
+        type, generatedAt: new Date().toISOString(), data: {
+          totals: { totalExecutions: rows.length, failedExecutions: failed.length, failureRate: rows.length ? failed.length / rows.length : 0, lastFailedAt: failed[0]?.executed_at || null },
+          topCases: caseIds.map((id) => ({ id, title: caseMap.get(id) || id, count: caseCount.get(id) })).sort((a, b) => b.count - a.count).slice(0, 20),
+          topPlans: planIds.map((id) => ({ id, title: planMap.get(id) || id, count: planCount.get(id) })).sort((a, b) => b.count - a.count).slice(0, 20),
+        }
+      });
     }
 
     if (type === 'requirements-defects') {
-      const { rows: reqs } = query('SELECT status, priority FROM requirements');
-      const { rows: defs } = query('SELECT status, severity FROM defects');
+      const projectId = filters?.projectId || null;
+      const projClause = projectId ? ' WHERE project_id = ?' : '';
+      const projParams = projectId ? [projectId] : [];
+      const { rows: reqs } = query('SELECT status, priority FROM requirements' + projClause, projParams);
+      const { rows: defs } = query('SELECT status, severity FROM defects' + projClause, projParams);
       const countBy = (rowArr, key) => rowArr.reduce((acc, row) => ({ ...acc, [row[key]]: (acc[row[key]] || 0) + 1 }), {});
-      return res.json({ type, generatedAt: new Date().toISOString(), data: {
-        totals: { requirements: reqs.length, defects: defs.length },
-        requirementsByStatus: countBy(reqs, 'status'),
-        requirementsByPriority: countBy(reqs, 'priority'),
-        defectsBySeverity: countBy(defs, 'severity'),
-        defectsByStatus: countBy(defs, 'status'),
-      }});
+      return res.json({
+        type, generatedAt: new Date().toISOString(), data: {
+          totals: { requirements: reqs.length, defects: defs.length },
+          requirementsByStatus: countBy(reqs, 'status'),
+          requirementsByPriority: countBy(reqs, 'priority'),
+          defectsBySeverity: countBy(defs, 'severity'),
+          defectsByStatus: countBy(defs, 'status'),
+        }
+      });
     }
 
     res.status(400).json({ error: { message: 'Tipo de relatorio nao suportado.' } });
@@ -696,7 +997,7 @@ async function extractFromPptx(filePath) {
           slide: null // Podemos mapear para slides posteriorente se necessário
         });
       } catch (imgErr) {
-        console.warn(`Erro ao extrair imagem ${mediaFile}:`, imgErr.message);
+        logger.warn(`Erro ao extrair imagem ${mediaFile}:`, imgErr.message);
       }
     }
 
@@ -740,10 +1041,10 @@ app.post('/api/documents/extract', requireUser, upload.single('file'), async (re
     } else if (ext === '.xlsx' || ext === '.xls') {
       result.text = '(Arquivo Excel detectado — cole o conteúdo das células relevantes no campo de Requisitos abaixo para melhor análise.)';
     } else {
-      await fs.unlink(filePath).catch(() => {});
+      await fs.unlink(filePath).catch(() => { });
       return res.status(400).json({ error: { message: `Formato '${ext}' não suportado. Use .pptx, .pdf, .docx, .doc ou .txt` } });
     }
-    await fs.unlink(filePath).catch(() => {});
+    await fs.unlink(filePath).catch(() => { });
     res.json({
       text: result.text,
       images: result.images,
@@ -824,21 +1125,134 @@ app.post('/api/ai/keys/reveal', requireUser, (req, res, next) => {
       ));
     }
     if (!rows.length) return res.status(404).json({ error: { message: 'Chave nao cadastrada.' } });
-    const key = decryptSecret(rows[0].key_encrypted);
-    res.json({ key });
+    try {
+      const key = decryptSecret(rows[0].key_encrypted);
+      res.json({ key });
+    } catch (e) {
+      logger.error('[security] Erro ao descriptografar chave:', e.message);
+      res.status(500).json({ error: { message: 'Erro ao descriptografar chave. Verifique o segredo mestre.' } });
+    }
   } catch (error) { next(error); }
 });
 
+// ── Reports Aggregator (Substitui Edge Functions do Supabase) ───────────────
+app.post('/api/reports/aggregate', requireUser, (req, res, next) => {
+  try {
+    const { type, filters } = req.body;
+
+    if (type === 'failure-analysis') {
+      const dateFrom = filters?.dateFrom ? `${filters.dateFrom} 00:00:00` : '1970-01-01 00:00:00';
+      const dateTo = filters?.dateTo ? `${filters.dateTo} 23:59:59` : '9999-12-31 23:59:59';
+
+      // CTE para buscar totais de execuções no período e calcular métricas de falha no próprio SQLite
+      const { rows: totalsRows } = query(`
+        WITH stats AS (
+          SELECT 
+            COUNT(*) as totalExecutions,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failedExecutions,
+            MAX(CASE WHEN status = 'failed' THEN created_at ELSE NULL END) as lastFailedAt
+          FROM test_executions
+          WHERE created_at >= ? AND created_at <= ?
+        )
+        SELECT 
+          totalExecutions,
+          COALESCE(failedExecutions, 0) as failedExecutions,
+          lastFailedAt,
+          CASE WHEN totalExecutions > 0 THEN CAST(COALESCE(failedExecutions, 0) AS REAL) / totalExecutions ELSE 0 END as failureRate
+        FROM stats
+      `, [dateFrom, dateTo]);
+
+      const totals = totalsRows[0] || { totalExecutions: 0, failedExecutions: 0, failureRate: 0, lastFailedAt: null };
+
+      // Top 5 casos de teste com mais falhas
+      const { rows: topCases } = query(`
+        SELECT c.id, c.title, COUNT(e.id) as count
+        FROM test_executions e
+        JOIN test_cases c ON e.case_id = c.id
+        WHERE e.status = 'failed' AND e.created_at >= ? AND e.created_at <= ?
+        GROUP BY c.id
+        ORDER BY count DESC
+        LIMIT 5
+      `, [dateFrom, dateTo]);
+
+      // Top 5 planos de teste com mais falhas
+      const { rows: topPlans } = query(`
+        SELECT p.id, p.title, COUNT(e.id) as count
+        FROM test_executions e
+        JOIN test_plans p ON e.plan_id = p.id
+        WHERE e.status = 'failed' AND e.created_at >= ? AND e.created_at <= ?
+        GROUP BY p.id
+        ORDER BY count DESC
+        LIMIT 5
+      `, [dateFrom, dateTo]);
+
+      return res.json({
+        type: 'failure-analysis',
+        generatedAt: new Date().toISOString(),
+        data: { totals, topCases, topPlans }
+      });
+    }
+
+    if (type === 'trend-analysis') {
+      // Retorna vazio por enquanto para evitar quebrar a interface
+      return res.json({
+        type: 'trend-analysis',
+        generatedAt: new Date().toISOString(),
+        data: { series: [], totals: { passed: 0, failed: 0, blocked: 0, not_tested: 0, total: 0 }, granularity: 'day' }
+      });
+    }
+
+    if (type === 'requirements-defects') {
+      // Retorna vazio por enquanto
+      return res.json({
+        type: 'requirements-defects',
+        generatedAt: new Date().toISOString(),
+        data: { totals: { requirements: 0, defects: 0 }, requirementsByStatus: {}, requirementsByPriority: {}, defectsBySeverity: {}, defectsByStatus: {} }
+      });
+    }
+
+    return res.status(400).json({ error: { message: `Relatório do tipo '${type}' não suportado.` } });
+  } catch (error) { next(error); }
+});
+
+// ── Cleanup Routine ─────────────────────────────────────────────────────────
+function cleanupOldData() {
+  try {
+    // Manter as notificações lidas apenas por 7 dias, e não-lidas por 30 dias
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    query('DELETE FROM notifications WHERE read_at IS NOT NULL AND created_at < ?', [sevenDaysAgo.toISOString()]);
+    query('DELETE FROM notifications WHERE created_at < ?', [thirtyDaysAgo.toISOString()]);
+
+    // Limpar logs de atividade com mais de 90 dias
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    query('DELETE FROM activity_logs WHERE created_at < ?', [ninetyDaysAgo.toISOString()]);
+
+    logger.info('[cleanup] Limpeza de dados antigos concluída.');
+  } catch (e) {
+    logger.warn('[cleanup] Falha na limpeza de dados:', e.message);
+  }
+}
+
+// Executa limpeza no boot
+cleanupOldData();
+// E a cada 24 horas
+setInterval(cleanupOldData, 24 * 60 * 60 * 1000);
+
 app.use((error, _req, res, _next) => {
-  console.error(error);
+  logger.error(error);
   res.status(500).json({ error: { message: error?.message || 'Erro interno.' } });
 });
 
 app.listen(PORT, () => {
-  console.log('Nexus Testing API rodando em http://localhost:' + PORT);
+  logger.info('Nexus Testing API rodando em http://localhost:' + PORT);
 });
 
 process.on('SIGINT', () => {
-  try { db.close(); } catch {}
+  try { db.close(); } catch { }
   process.exit(0);
 });

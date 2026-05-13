@@ -178,13 +178,22 @@ const generateMarkdownContent = (
   }
   
   if (type === 'plan' && 'objective' in item) {
-    content += `## Objetivo\n${toMarkdownListOrParagraph((item as any).objective || '')}\n\n`;
-    content += `## Escopo\n${toMarkdownListOrParagraph((item as any).scope || '')}\n\n`;
-    content += `## Abordagem\n${toMarkdownListOrParagraph((item as any).approach || '')}\n\n`;
-    content += `## Critérios\n${toMarkdownListOrParagraph((item as any).criteria || '')}\n\n`;
+    if ((item as any).objective) content += `## Objetivo\n${toMarkdownListOrParagraph((item as any).objective || '')}\n\n`;
+    if ((item as any).scope) content += `## Escopo\n${toMarkdownListOrParagraph((item as any).scope || '')}\n\n`;
+    if ((item as any).approach) content += `## Abordagem\n${toMarkdownListOrParagraph((item as any).approach || '')}\n\n`;
+    if ((item as any).criteria) content += `## Critérios\n${toMarkdownListOrParagraph((item as any).criteria || '')}\n\n`;
+    
+    const branches = (item as any).branches || (item as any).resources;
+    if (branches) {
+      content += `## Branches de Entrega\n${toMarkdownListOrParagraph(branches)}\n\n`;
+    }
   }
   
   if (type === 'case' && 'steps' in item) {
+    if ((item as any).branches) {
+      content += `**Branch:** ${(item as any).branches}\n\n`;
+    }
+
     if (item.preconditions) {
       content += `## Pré-condições\n${item.preconditions}\n\n`;
     }
@@ -299,13 +308,22 @@ const generateHTMLContent = (
   }
   
   if (type === 'plan' && 'objective' in item) {
-    html += `<h2>Objetivo</h2>${toHTMLListOrParagraph((item as any).objective || '')}`;
-    html += `<h2>Escopo</h2>${toHTMLListOrParagraph((item as any).scope || '')}`;
-    html += `<h2>Abordagem</h2>${toHTMLListOrParagraph((item as any).approach || '')}`;
-    html += `<h2>Critérios</h2>${toHTMLListOrParagraph((item as any).criteria || '')}`;
+    if ((item as any).objective) html += `<h2>Objetivo</h2>${toHTMLListOrParagraph((item as any).objective || '')}`;
+    if ((item as any).scope) html += `<h2>Escopo</h2>${toHTMLListOrParagraph((item as any).scope || '')}`;
+    if ((item as any).approach) html += `<h2>Abordagem</h2>${toHTMLListOrParagraph((item as any).approach || '')}`;
+    if ((item as any).criteria) html += `<h2>Critérios</h2>${toHTMLListOrParagraph((item as any).criteria || '')}`;
+    
+    const branches = (item as any).branches || (item as any).resources;
+    if (branches) {
+      html += `<h2>Branches de Entrega</h2>${toHTMLListOrParagraph(branches)}`;
+    }
   }
   
   if (type === 'case' && 'steps' in item) {
+    if ((item as any).branches) {
+      html += `<p><strong>Branch:</strong> ${(item as any).branches}</p>`;
+    }
+
     if (item.preconditions) {
       html += `<h2>Pré-condições</h2><p>${item.preconditions}</p>`;
     }
@@ -395,12 +413,23 @@ const generateHTMLContent = (
   return html;
 };
 
+const TYPE_PREFIX: Record<string, string> = {
+  plan: 'PT',
+  case: 'CT',
+  execution: 'EX',
+  requirement: 'RQ',
+  defect: 'DF',
+};
+
 const getItemTitle = (item: TestPlan | TestCase | TestExecution | Requirement | Defect, type: 'plan' | 'case' | 'execution' | 'requirement' | 'defect'): string => {
-  if (type === 'execution') {
-    const seq = 'sequence' in item && (item as any).sequence ? (item as any).sequence : item.id.slice(0, 8);
-    return `Execução #${seq}`;
-  }
-  return (item as TestPlan | TestCase | Requirement | Defect).title;
+  const prefix = TYPE_PREFIX[type] ?? type.toUpperCase();
+  const seq = 'sequence' in item && (item as any).sequence
+    ? String((item as any).sequence).padStart(3, '0')
+    : item.id.slice(0, 6).toUpperCase();
+  const id = `${prefix}-${seq}`;
+
+  if (type === 'execution') return `${id} — Execução de Teste`;
+  return `${id} — ${(item as TestPlan | TestCase | Requirement | Defect).title}`;
 };
 
 const getItemDescription = (item: TestPlan | TestCase | TestExecution | Requirement | Defect, type: 'plan' | 'case' | 'execution' | 'requirement' | 'defect'): string => {
@@ -427,18 +456,21 @@ const exportToPDF = async (content: string, filename: string) => {
           <meta charset="utf-8" />
           <title>${filename}</title>
           <style>
-            @page { size: A4; margin: 12mm; }
+            @page { size: A4; margin: 15mm; }
             html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            body { font-family: Arial, sans-serif; margin: 0; font-size: 12px; color: #111; line-height: 1.4; }
-            h1, h2 { color: #333; margin: 0 0 10px 0; page-break-after: avoid; }
-            hr { border: 0; border-top: 1px solid #ddd; margin: 12px 0; }
-            table { border-collapse: collapse; width: 100%; margin: 12px 0 20px 0; table-layout: auto; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
-            th { background-color: #f5f5f5; font-weight: bold; }
+            body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; font-size: 13px; color: #1a1a1a; line-height: 1.5; }
+            h1 { color: #00c2a8; margin: 0 0 16px 0; font-size: 24px; border-bottom: 2px solid #00c2a8; padding-bottom: 8px; page-break-after: avoid; }
+            h2 { color: #333; margin: 24px 0 12px 0; font-size: 16px; border-bottom: 1px solid #eee; padding-bottom: 4px; page-break-after: avoid; }
+            hr { border: 0; border-top: 1px solid #eee; margin: 16px 0; }
+            table { border-collapse: collapse; width: 100%; margin: 16px 0 24px 0; table-layout: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+            th, td { border: 1px solid #e5e7eb; padding: 10px; text-align: left; vertical-align: top; }
+            th { background-color: #f9fafb; font-weight: 600; color: #374151; }
+            tr:nth-child(even) { background-color: #f9fafb; }
             tr { page-break-inside: avoid; }
-            p { white-space: pre-wrap; }
-            ul { margin: 0 0 12px 20px; padding: 0; }
-            li { margin: 4px 0; }
+            p { margin: 0 0 8px 0; white-space: pre-wrap; }
+            ul, ol { margin: 0 0 16px 24px; padding: 0; }
+            li { margin: 6px 0; }
+            strong { color: #111; }
           </style>
         </head>
         <body>

@@ -20,6 +20,7 @@ import NotFound from '@/pages/NotFound';
 const TestPlans = lazy(() => import('@/pages/TestPlans').then(m => ({ default: m.TestPlans })));
 const TestCases = lazy(() => import('@/pages/TestCases').then(m => ({ default: m.TestCases })));
 const TestExecutions = lazy(() => import('@/pages/TestExecutions').then(m => ({ default: m.TestExecutions })));
+const TestRuns = lazy(() => import('@/pages/TestRuns').then(m => ({ default: m.TestRuns })));
 const Gestao = lazy(() => import('@/pages/Gestao').then(m => ({ default: m.Gestao })));
 
 // Paginas pesadas/pouco frequentes (totalmente lazy)
@@ -69,6 +70,7 @@ function AppRouter() {
         <Route path="/plans" element={<PermissionGuard requiredPermission="can_manage_plans"><TestPlans /></PermissionGuard>} />
         <Route path="/cases" element={<PermissionGuard requiredPermission="can_manage_cases"><TestCases /></PermissionGuard>} />
         <Route path="/executions" element={<PermissionGuard requiredPermission="can_manage_executions"><TestExecutions /></PermissionGuard>} />
+        <Route path="/runs" element={<PermissionGuard requiredPermission="can_manage_executions"><TestRuns /></PermissionGuard>} />
         {/* Nova página Gestão com abas */}
         <Route 
           path="/management" 

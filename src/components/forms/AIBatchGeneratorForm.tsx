@@ -7,11 +7,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/use-toast';
-import { Sparkles, Loader2, Zap, Upload, AlertCircle } from 'lucide-react';
+import { Sparkles, Loader2, Zap, Upload, AlertCircle, Info } from 'lucide-react';
 import { AIModel } from '@/types';
 import * as ModelControlService from '@/services/modelControlService';
 import { useAISettings } from '@/hooks/useAISettings';
 import { useProject } from '@/contexts/ProjectContext';
+import { UserMultiSelectField } from '@/components/forms/UserMultiSelectField';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ChevronDown, ChevronUp } from 'lucide-react';
+import { notifyStakeholders } from '@/services/supabaseService';
 
 interface AIBatchGeneratorFormProps {
   onSuccess?: (data: any) => void;
@@ -32,6 +36,10 @@ export const AIBatchGeneratorForm = ({ onSuccess, type = 'plan', mode = 'standar
   const [file, setFile] = useState<File | null>(null);
   const [selectedModel, setSelectedModel] = useState('default');
   const [availableModels, setAvailableModels] = useState<AIModel[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [assignedTo, setAssignedTo] = useState<string>('none');
+  const [interestedUsers, setInterestedUsers] = useState<string[]>([]);
+  const [showContent, setShowContent] = useState(true);
 
   // Persistência de estado do formulário para evitar perda em reloads involuntários
   useEffect(() => {
@@ -57,7 +65,15 @@ export const AIBatchGeneratorForm = ({ onSuccess, type = 'plan', mode = 'standar
 
   useEffect(() => {
     loadAvailableModels();
+    loadUsers();
   }, []);
+
+  const loadUsers = async () => {
+    try {
+      const { data } = await supabase.from('profiles' as any).select('id, email, display_name');
+      if (data) setUsers(data);
+    } catch (e) { console.error('Erro ao carregar usuários:', e); }
+  };
 
   const loadAvailableModels = () => {
     try {
@@ -240,12 +256,14 @@ export const AIBatchGeneratorForm = ({ onSuccess, type = 'plan', mode = 'standar
           priority: sanitizeText(typeof c?.priority === 'string' ? c.priority : 'medium'),
           type: sanitizeText(typeof c?.type === 'string' ? c.type : 'functional'),
           steps: stepsArray.map((s: any, idx: number) => ({
-            id: crypto.randomUUID(),
+            id: (window as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2),
             action: sanitizeText(s?.action),
             expected_result: sanitizeText(s?.expected_result),
             order: idx + 1,
           })),
           user_id: userId,
+          assigned_to: assignedTo !== 'none' ? assignedTo : null,
+          interested_users: interestedUsers,
           project_id: projectId,
           generated_by_ai: true,
           created_at: new Date(),
@@ -315,6 +333,7 @@ export const AIBatchGeneratorForm = ({ onSuccess, type = 'plan', mode = 'standar
         schedule: '',
         risks: '',
         user_id: userId,
+        assigned_to: assignedTo !== 'none' ? assignedTo : null,
         project_id: projectId,
         generated_by_ai: true,
         created_at: new Date(),
@@ -484,12 +503,14 @@ export const AIBatchGeneratorForm = ({ onSuccess, type = 'plan', mode = 'standar
 
       return (casesRaw as any[]).map((testCase: any) => ({
         ...testCase,
-        id: crypto.randomUUID(),
+        id: (window as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2),
         user_id: userId,
+        assigned_to: assignedTo !== 'none' ? assignedTo : null,
+        interested_users: interestedUsers,
         generated_by_ai: true,
         steps: testCase.steps?.map((step: any, index: number) => ({
           ...step,
-          id: crypto.randomUUID(),
+          id: (window as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2),
           order: index + 1
         })) || [],
         created_at: new Date(),
@@ -570,8 +591,10 @@ export const AIBatchGeneratorForm = ({ onSuccess, type = 'plan', mode = 'standar
       // Adicionar IDs únicos para cada plano
       return (plansRaw as any[]).map((plan: any) => ({
         ...plan,
-        id: crypto.randomUUID(),
+        id: (window as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2),
         user_id: userId,
+        assigned_to: assignedTo !== 'none' ? assignedTo : null,
+        interested_users: interestedUsers,
         generated_by_ai: true,
         created_at: new Date(),
         updated_at: new Date()
@@ -622,7 +645,7 @@ export const AIBatchGeneratorForm = ({ onSuccess, type = 'plan', mode = 'standar
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !documentContent.trim()) return;
     if (!currentProject?.id) {
@@ -631,53 +654,82 @@ export const AIBatchGeneratorForm = ({ onSuccess, type = 'plan', mode = 'standar
     }
 
     setLoading(true);
-    try {
-      if (type === 'case') {
-        // Gerar casos em lote usando a API do Gemini
-        const cases = await generateBatchCases(documentContent, context, user.id);
-        
-        // Salvar casos gerados no Supabase
-        const result = await saveCasesToSupabase(cases);
 
-      toast({
-        title: "Sucesso",
-          description: `Análise do documento concluída! ${cases.length} casos gerados com IA.`
-      });
+    toast({
+      title: "Análise iniciada",
+      description: "A IA está processando o documento em segundo plano."
+    });
 
-        onSuccess?.(result);
-      } else {
-        if (mode === 'plan-with-cases') {
-          // Gerar um único plano com múltiplos casos
-          const { plan, cases } = await generatePlanWithCases(documentContent, context, user.id, currentProject.id);
-          const result = await savePlanWithCasesToSupabase(plan, cases);
-          toast({
-            title: 'Sucesso',
-            description: `Plano criado com ${cases.length} casos gerados pela IA.`
-          });
-          onSuccess?.(result);
-        } else {
-          // Gerar planos em lote (padrão)
-          const plans = await generateBatchPlans(documentContent, context, user.id);
-          const result = await savePlansToSupabase(plans);
+    // Notify parent to close the form/modal and redirect
+    onSuccess?.(null);
+
+    // Process in background
+    (async () => {
+      try {
+        if (type === 'case') {
+          const cases = await generateBatchCases(documentContent, context, user.id);
+          await saveCasesToSupabase(cases);
+          await handleStakeholderNotifications(cases.length);
           toast({
             title: "Sucesso",
-            description: `Análise do documento concluída! ${plans.length} planos gerados com IA.`
+            description: `Análise concluída! ${cases.length} casos gerados e salvos com IA.`
           });
-          onSuccess?.(result);
+        } else {
+          if (mode === 'plan-with-cases') {
+            const { plan, cases } = await generatePlanWithCases(documentContent, context, user.id, currentProject.id);
+            await savePlanWithCasesToSupabase(plan, cases);
+            await handleStakeholderNotifications(1);
+            toast({
+              title: 'Sucesso',
+              description: `Plano criado com ${cases.length} casos gerados pela IA.`
+            });
+          } else {
+            const plans = await generateBatchPlans(documentContent, context, user.id);
+            await savePlansToSupabase(plans);
+            await handleStakeholderNotifications(plans.length);
+            toast({
+              title: "Sucesso",
+              description: `Análise concluída! ${plans.length} planos gerados e salvos com IA.`
+            });
+          }
         }
+      } catch (error) {
+        console.error(`Erro ao gerar ${type === 'case' ? 'casos' : 'planos'} em lote:`, error);
+        const message = error instanceof Error ? error.message : String(error);
+        toast({
+          title: "Erro na geração",
+          description: message,
+          variant: "destructive"
+        });
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error(`Erro ao gerar ${type === 'case' ? 'casos' : 'planos'} em lote:`, error);
-      const message = error instanceof Error ? error.message : String(error);
-      toast({
-        title: "Erro",
-        description: `Erro ao gerar ${type === 'case' ? 'casos' : (mode === 'plan-with-cases' ? 'plano com casos' : 'planos')}: ${message}`,
-        variant: "destructive"
+    })();
+  };
+
+  const handleStakeholderNotifications = async (itemsCount: number) => {
+    const stakeholders = [...(interestedUsers || [])];
+    if (assignedTo && assignedTo !== 'none') {
+      stakeholders.push(assignedTo);
+    }
+
+    if (stakeholders.length > 0) {
+      const reporterName = (user as any)?.user_metadata?.full_name || (user as any)?.email || 'Alguém';
+      const typeLabel = type === 'plan' ? 'planos' : 'casos';
+      await notifyStakeholders({
+        stakeholderIds: stakeholders,
+        title: `Novo lote de ${typeLabel} (IA) - você é interessado`,
+        body: `${reporterName} gerou um lote de ${itemsCount} ${typeLabel} com IA.`,
+        link: type === 'plan' ? '/plans' : '/cases',
       });
-    } finally {
-      setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (loading === false && documentContent) {
+      // Logic handled in handleSubmit finally or after success
+    }
+  }, [loading]);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4" aria-busy={loading}>
@@ -708,95 +760,134 @@ export const AIBatchGeneratorForm = ({ onSuccess, type = 'plan', mode = 'standar
         </label>
       </div>
 
-      {/* 2-column main body */}
-      <div className="grid grid-cols-[1fr_240px] gap-5">
-
+      {/* 2-column main body — modern grid pattern */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
         {/* LEFT — main content textarea */}
-        <div>
-          <Label className="text-xs font-medium mb-1.5 block">
-            {mode === 'plan-with-cases' ? 'Tabela / Descrição de Funcionalidades' : 'Conteúdo do Documento'}
-            {' '}<span className="text-destructive">*</span>
-            <span className="text-muted-foreground font-normal ml-1.5">
-              {mode === 'plan-with-cases'
-                ? '— colunas: Funcionalidade, Objetivo, Escopo, Ambiente, Testes'
-                : '— cole o documento completo para análise automática'}
-            </span>
-          </Label>
-          <Textarea
-            value={documentContent}
-            onChange={(e) => setDocumentContent(e.target.value)}
-            rows={12}
-            className="text-sm resize-none font-mono"
-            placeholder={mode === 'plan-with-cases'
-              ? 'Funcionalidade | Objetivo | Escopo | Ambiente | Testes\n---\nLogin        | Autenticar usuário | ...'
-              : 'Cole o conteúdo do documento aqui.\nA IA identificará automaticamente os cenários e gerará os itens correspondentes.'}
-            required
-          />
+        {/* Main body — modern grid pattern */}
+        <div className="lg:col-span-8 space-y-4">
+          <Collapsible open={showContent} onOpenChange={setShowContent} className="border border-border/50 rounded-lg overflow-hidden bg-background/30">
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" className="w-full flex justify-between items-center px-4 py-3 hover:bg-muted/50 rounded-none h-auto">
+                <div className="flex items-center gap-2">
+                  <Info className="h-4 w-4 text-brand" />
+                  <span className="text-sm font-semibold">Fonte de Dados (Analise pela IA)</span>
+                  {!showContent && documentContent.trim() && (
+                    <Badge variant="outline" className="text-[10px] ml-2">Conteúdo carregado</Badge>
+                  )}
+                </div>
+                {showContent ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="p-4 border-t border-border/50 space-y-4">
+              <div className="space-y-2">
+                <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
+                  {mode === 'plan-with-cases' ? 'Tabela / Descrição de Funcionalidades' : 'Conteúdo do Documento'}
+                </Label>
+                <Textarea
+                  value={documentContent}
+                  onChange={(e) => setDocumentContent(e.target.value)}
+                  rows={12}
+                  className="text-sm resize-none font-mono bg-background/50 border-border/40 focus:border-brand/50 focus:ring-0 transition-all"
+                  placeholder={mode === 'plan-with-cases'
+                    ? 'Funcionalidade | Objetivo | Escopo | Ambiente | Testes\n---\nLogin        | Autenticar usuário | ...'
+                    : 'Cole o conteúdo do documento aqui.'}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">Contexto Adicional</Label>
+                <Textarea
+                  value={context}
+                  onChange={(e) => setContext(e.target.value)}
+                  rows={3}
+                  className="text-sm resize-none bg-background/50 border-border/40 focus:border-brand/50 focus:ring-0 transition-all"
+                  placeholder="Tecnologias, padrões, ambiente..."
+                />
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </div>
 
-        {/* RIGHT — context, model, info, generate */}
-        <div className="space-y-3">
-          <div>
-            <Label className="text-xs font-medium mb-1.5 block">Contexto Adicional</Label>
-            <Textarea
-              value={context}
-              onChange={(e) => setContext(e.target.value)}
-              rows={4}
-              className="text-sm resize-none"
-              placeholder="Tecnologias, padrões, ambiente..."
-            />
-          </div>
-
-          <div>
-            <Label className="text-xs font-medium mb-1.5 flex items-center gap-1.5">
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
               <Zap className="h-3.5 w-3.5 text-amber-400" />
               Modelo de IA
-              <span className="text-muted-foreground font-normal">(opcional)</span>
             </Label>
             <Select value={selectedModel} onValueChange={setSelectedModel}>
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue />
+              <SelectTrigger className="h-10 bg-background/50 border-border/50 focus:border-brand/50 focus:ring-brand/20">
+                <SelectValue placeholder="Selecionar modelo" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="default" className="text-xs">⚡ Modelo Padrão (Recomendado)</SelectItem>
+                <SelectItem value="default" className="text-sm">⚡ Modelo Padrão (Recomendado)</SelectItem>
                 {availableModels.map((m) => (
-                  <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
+                  <SelectItem key={m.id} value={m.id} className="text-sm">{m.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            {selectedModelObj && providerRequiresApiKey(selectedModelObj.provider) && (
-              <p className="text-xs text-amber-500 mt-1">⚠ Requer API key no Painel de Modelos</p>
-            )}
           </div>
 
-          <div className="rounded-lg border border-border/50 bg-muted/30 p-3 space-y-1">
-            <p className="text-xs font-medium text-foreground/80">Como funciona:</p>
-            <ul className="text-xs text-muted-foreground space-y-0.5">
-              <li>• A IA analisa o documento</li>
-              <li>• Identifica cenários/funcionalidades</li>
-              <li>• Gera {type === 'case' ? 'casos' : 'planos'} para cada situação</li>
-              <li>• Você revisa cada item individualmente</li>
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">Responsável Padrão</Label>
+            <Select value={assignedTo} onValueChange={setAssignedTo}>
+              <SelectTrigger className="h-10 bg-background/50 border-border/50 focus:border-brand/50 focus:ring-brand/20">
+                <SelectValue placeholder="Atribuir a..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none" className="text-sm">Não atribuir</SelectItem>
+                {users.map(u => (
+                  <SelectItem key={u.id} value={u.id} className="text-sm">{labelFor(u)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground">Todos os itens gerados serão atribuídos a este usuário.</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">Equipe Interessada</Label>
+            <UserMultiSelectField 
+              selectedIds={interestedUsers}
+              onChange={setInterestedUsers}
+              placeholder="Notificar interessados..."
+            />
+          </div>
+
+          <div className="rounded-xl border border-brand/20 bg-brand/5 p-4 space-y-2.5">
+            <div className="flex items-center gap-2 text-brand">
+              <Info className="h-4 w-4" />
+              <p className="text-xs font-bold uppercase tracking-tight">Como funciona:</p>
+            </div>
+            <ul className="text-xs text-foreground/70 space-y-1.5 list-none pl-0">
+              <li className="flex gap-2">
+                <span className="text-brand font-bold">•</span>
+                <span>A IA analisa o documento e identifica cenários automaticamente.</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-brand font-bold">•</span>
+                <span>Gera {type === 'case' ? 'casos' : 'planos'} estruturados para cada situação.</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-brand font-bold">•</span>
+                <span>Você revisa e edita cada item individualmente após a criação.</span>
+              </li>
             </ul>
           </div>
 
           <Button
             type="submit"
             disabled={loading || !documentContent.trim() || !currentProject?.id}
-            className="w-full"
+            className="w-full h-12 bg-brand hover:bg-brand/90 text-white font-bold shadow-lg shadow-brand/20 transition-all hover:scale-[1.02] active:scale-[0.98] gap-2"
             aria-busy={loading}
           >
             {loading ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Analisando...
-              </>
+              <Loader2 className="h-5 w-5 animate-spin" />
             ) : (
-              <>
-                <Sparkles className="h-4 w-4 mr-2" />
-                {mode === 'plan-with-cases' && type === 'plan'
-                  ? 'Gerar Plano com Casos'
-                  : `Gerar ${type === 'case' ? 'Casos' : 'Planos'} com IA`}
-              </>
+              <Sparkles className="h-5 w-5" />
+            )}
+            {loading ? 'Processando...' : (
+              mode === 'plan-with-cases' && type === 'plan'
+                ? 'Gerar Plano com Casos'
+                : `Gerar ${type === 'case' ? 'Casos' : 'Planos'} com IA`
             )}
           </Button>
         </div>

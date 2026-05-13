@@ -1,7 +1,7 @@
-﻿import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTrigger, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import {
   FileText, TestTube, PlayCircle, Bug, Plus, Sparkles,
   ClipboardCheck, Link2, BarChart3, Download, Loader2,
@@ -12,7 +12,7 @@ import { useAuth } from '@/hooks/useAuth';
 import {
   getTestPlans, getTestCases, getTestExecutions, getDefects, getRequirements,
   getTestCasesByProject, getTestExecutionsByProject, getDefectsByProject, getRequirementsByProject,
-  getPlanLinkedCounts,
+  getPlanLinkedCounts, getDashboardStats,
 } from '@/services/supabaseService';
 import { TestPlan, TestCase, TestExecution, Defect, Requirement } from '@/types';
 import { useDashboardSettings } from '@/hooks/useDashboardSettings';
@@ -21,6 +21,7 @@ import { TestCaseForm } from '@/components/forms/TestCaseForm';
 import { TestExecutionForm } from '@/components/forms/TestExecutionForm';
 import { DetailModal } from '@/components/DetailModal';
 import { StandardButton } from '@/components/StandardButton';
+import { UnifiedTestCreation } from '@/components/UnifiedTestCreation';
 import { useNavigate } from 'react-router-dom';
 import { useProject } from '@/contexts/ProjectContext';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -132,7 +133,7 @@ export const Dashboard = () => {
     if (!user) return;
     setLoading(true);
     try {
-      // Resolve nome
+      // 1. Resolve nome (se mantem igual)
       if (SINGLE_TENANT) {
         setWelcomeName((user.user_metadata as any)?.full_name || user.email || 'Usuário');
       } else {
@@ -140,57 +141,33 @@ export const Dashboard = () => {
         setWelcomeName((data as any)?.display_name || user.email || 'Usuário');
       }
 
-      // Fetch dados
-      let plans: TestPlan[] = [];
-      let cases: TestCase[] = [];
-      let executions: TestExecution[] = [];
-      let defects: Defect[] = [];
-      let requirements: Requirement[] = [];
-
-      if (currentProject?.id) {
-        const [p, c, e, d, r] = await Promise.all([
-          getTestPlans(user.id, currentProject.id),
-          getTestCasesByProject(user.id, currentProject.id),
-          getTestExecutionsByProject(user.id, currentProject.id),
-          getDefectsByProject(user.id, currentProject.id),
-          getRequirementsByProject(user.id, currentProject.id),
-        ]);
-        plans = p; cases = c; executions = e; defects = d; requirements = r;
-      } else {
-        const active = (projects || []).filter(pr => pr.status === 'active');
-        if (active.length > 0) {
-          const [pp, cc, ee, dd, rr] = await Promise.all([
-            Promise.all(active.map(pj => getTestPlans(user.id, pj.id))),
-            Promise.all(active.map(pj => getTestCasesByProject(user.id, pj.id))),
-            Promise.all(active.map(pj => getTestExecutionsByProject(user.id, pj.id))),
-            Promise.all(active.map(pj => getDefectsByProject(user.id, pj.id))),
-            Promise.all(active.map(pj => getRequirementsByProject(user.id, pj.id))),
-          ]);
-          plans = pp.flat(); cases = cc.flat(); executions = ee.flat(); defects = dd.flat(); requirements = rr.flat();
-        }
+      // 2. Fetch dados agregados (Otimização T02)
+      const { data: stats, error } = await getDashboardStats(currentProject?.id);
+      
+      if (error || !stats) {
+        console.error('Dashboard load error:', error);
+        return;
       }
 
       // ── Overview ──
-      const aiGen = cases.filter(c => c.generated_by_ai).length + plans.filter(p => p.generated_by_ai).length;
-      setOverview({
-        totalPlans: plans.length,
-        totalCases: cases.length,
-        totalExecutions: executions.length,
-        totalRequirements: requirements.length,
-        totalDefects: defects.filter(d => d.status !== 'closed').length,
-        aiGenerated: aiGen,
-      });
+      setOverview(stats.overview);
 
       // ── Execuções ──
+      const es = stats.execStats || [];
       setExecStats({
-        passed: executions.filter(e => e.status === 'passed').length,
-        failed: executions.filter(e => e.status === 'failed').length,
-        blocked: executions.filter(e => e.status === 'blocked').length,
-        not_tested: executions.filter(e => e.status === 'not_tested').length,
+        passed: es.find((s: any) => s.status === 'passed')?.count || 0,
+        failed: es.find((s: any) => s.status === 'failed')?.count || 0,
+        blocked: es.find((s: any) => s.status === 'blocked')?.count || 0,
+        not_tested: es.find((s: any) => s.status === 'not_tested')?.count || 0,
       });
 
-      // ── Cobertura ── (tabela requirements_cases com 's')
-      const reqIds = requirements.map(r => r.id);
+      // ── Cobertura ── (Isolado pois exige lógica de contagem específica por enquanto)
+      // TODO: Integrar no aggregate no futuro se necessário
+      const { data: requirements } = currentProject?.id 
+        ? await getRequirementsByProject(user.id, currentProject.id)
+        : await getRequirements(user.id);
+      
+      const reqIds = (requirements || []).map(r => r.id);
       let covered = 0;
       if (reqIds.length > 0) {
         const { data: links } = await supabase
@@ -199,46 +176,39 @@ export const Dashboard = () => {
           .in('requirement_id', reqIds);
         covered = new Set((links ?? []).map((l: any) => l.requirement_id)).size;
       }
-      setCoverage({ covered, total: requirements.length });
+      setCoverage({ covered, total: (requirements || []).length });
 
       // ── Defeitos ──
+      const ds = stats.defectStats || [];
       setDefectStats({
-        open: defects.filter(d => d.status === 'open').length,
-        critical: defects.filter(d => d.severity === 'critical').length,
-        high: defects.filter(d => d.severity === 'high').length,
+        open: ds.filter((s: any) => s.status === 'open').reduce((acc: number, s: any) => acc + s.count, 0),
+        critical: ds.filter((s: any) => s.severity === 'critical').reduce((acc: number, s: any) => acc + s.count, 0),
+        high: ds.filter((s: any) => s.severity === 'high').reduce((acc: number, s: any) => acc + s.count, 0),
       });
 
       // ── Progresso por plano ──
-      const planLinkedArr = await Promise.all(
-        plans.map(p => getPlanLinkedCounts(user.id, p.id).then(c => ({ id: p.id, cases: c.testCaseCount, execs: c.executionCount })))
-      );
-      const planMap: Record<string, { cases: number; execs: number }> = {};
-      planLinkedArr.forEach(r => { planMap[r.id] = { cases: r.cases, execs: r.execs }; });
-
-      const rows = plans.map(p => {
-        const s = planMap[p.id];
-        const nc = s?.cases || 0;
-        const ne = s?.execs || 0;
-        return { planId: p.id, title: p.title, percent: nc === 0 ? 0 : Math.min(100, Math.round((ne / nc) * 100)), total: nc, sequence: p.sequence, plan: p };
-      }).sort((a, b) => b.total - a.total || b.percent - a.percent).slice(0, 4);
-      setProgressRows(rows);
+      setProgressRows((stats.planProgress || []).map((p: any) => ({
+        planId: p.id,
+        title: p.title,
+        percent: p.case_count === 0 ? 0 : Math.min(100, Math.round((p.exec_count / p.case_count) * 100)),
+        total: p.case_count,
+        sequence: p.sequence,
+        plan: p
+      })));
 
       // ── Atividade recente ──
-      const allItems: RecentItem[] = [
-        ...plans.map(p => ({ id: p.id, type: 'plan' as const, title: p.title, updated_at: p.updated_at, generated_by_ai: p.generated_by_ai, data: p })),
-        ...cases.map(c => ({ id: c.id, type: 'case' as const, title: c.title, updated_at: c.updated_at, generated_by_ai: c.generated_by_ai, data: c })),
-        ...executions.map(e => ({ id: e.id, type: 'execution' as const, title: `Execução #${e.id.slice(0, 6)}`, updated_at: e.executed_at, data: e })),
-        ...requirements.map(r => ({ id: r.id, type: 'requirement' as const, title: r.title, updated_at: r.updated_at, data: r })),
-        ...defects.map(d => ({ id: d.id, type: 'defect' as const, title: d.title, updated_at: d.updated_at, data: d })),
-      ];
-      allItems.sort((a, b) => b.updated_at.getTime() - a.updated_at.getTime());
-      setRecentItems(allItems.slice(0, 7));
+      setRecentItems((stats.recent || []).map((r: any) => ({
+        ...r,
+        updated_at: new Date(r.updated_at),
+        data: r // Simplificado: o modal de detalhes vai buscar o item completo se necessário
+      })));
+
     } catch (e) {
       console.error('Dashboard load error:', e);
     } finally {
       setLoading(false);
     }
-  }, [user, currentProject?.id, projects]);
+  }, [user, currentProject?.id, projects, SINGLE_TENANT]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -248,7 +218,8 @@ export const Dashboard = () => {
     switch (settings.quickActionType) {
       case 'case': return { label: 'Novo Caso', component: TestCaseForm };
       case 'execution': return { label: 'Nova Execução', component: TestExecutionForm };
-      default: return { label: 'Novo Plano', component: TestPlanForm };
+      case 'unified': return { label: 'Fluxo Unificado', component: UnifiedTestCreation };
+      default: return { label: 'Criação Rápida', component: UnifiedTestCreation };
     }
   })();
   const FormComponent = quickAction.component;

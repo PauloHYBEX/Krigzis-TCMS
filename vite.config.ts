@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => ({
     host: "::",
     port: 5173,
     strictPort: false,
+    open: true,
     proxy: {
       '/api': {
         target: 'http://localhost:4000',
@@ -25,6 +26,21 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: (id) => {
+          if (id.includes('node_modules')) {
+            if (id.includes('@radix-ui') || id.includes('cmdk')) return 'vendor-radix';
+            if (id.includes('@google/generative-ai') || id.includes('openai') || id.includes('@anthropic-ai') || id.includes('groq-sdk')) return 'vendor-ai';
+            if (id.includes('react-dom') || id.includes('react-router') || id.includes('react-query') || id.includes('@tanstack')) return 'vendor-react';
+            if (id.includes('lucide-react') || id.includes('recharts')) return 'vendor-ui';
+            return 'vendor';
+          }
+        },
+      },
     },
   },
 }));

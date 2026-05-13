@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { 
@@ -171,18 +171,11 @@ export const UserProfileModal: React.FC<{
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md 
-        [&_*[aria-label='Close']]:!ring-0 
-        [&_*[aria-label='Close']]:!ring-offset-0 
-        [&_*[aria-label='Close']]:!outline-none 
-        [&_*[aria-label='Close']]:!focus:outline-none 
-        [&_*[aria-label='Close']]:!focus:ring-0 
-        [&_*[aria-label='Close']]:!focus:ring-offset-0 
-        [&_*[aria-label='Close']]:!focus-visible:outline-none 
-        [&_*[aria-label='Close']]:!focus-visible:ring-0 
-        [&_*[aria-label='Close']]:!focus-visible:ring-offset-0
-      ">
-        {/* Removido cabeçalho textual para evitar redundância com o tooltip de abertura */}
+      <DialogContent className="sm:max-w-md [&_*[aria-label='Close']]:!ring-0 [&_*[aria-label='Close']]:!ring-offset-0 [&_*[aria-label='Close']]:!outline-none [&_*[aria-label='Close']]:!focus:outline-none [&_*[aria-label='Close']]:!focus:ring-0 [&_*[aria-label='Close']]:!focus:ring-offset-0 [&_*[aria-label='Close']]:!focus-visible:outline-none [&_*[aria-label='Close']]:!focus-visible:ring-0 [&_*[aria-label='Close']]:!focus-visible:ring-offset-0">
+        <DialogHeader className="sr-only">
+          <DialogTitle>Perfil de {profile?.display_name || 'Usuário'}</DialogTitle>
+          <DialogDescription>Detalhes do perfil profissional e informações de contato.</DialogDescription>
+        </DialogHeader>
 
         <div className="flex flex-col items-center text-center gap-3">
           <Avatar className="h-24 w-24">

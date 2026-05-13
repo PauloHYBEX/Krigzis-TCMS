@@ -1,6 +1,33 @@
 import { supabase } from '@/integrations/supabase/client';
 import { TestPlan, TestCase, TestExecution, TestStep, Requirement, Defect } from '@/types';
 
+// ==============================================================================
+// FASE T03: UNIFIED MUTATION SERVICE
+// ==============================================================================
+export const saveUnifiedPlan = async (payload: { plan: any, cases: any[] }): Promise<{ plan: TestPlan, cases: TestCase[] }> => {
+  // Chamada unificada para persistência atômica (T03)
+  const token = localStorage.getItem('krg_local_auth_token');
+  const res = await fetch(`${import.meta.env.VITE_API_URL || '/api'}/mutate/unified`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error?.message || 'Erro ao salvar fluxo unificado');
+
+  const { plan, cases } = body.data;
+  return {
+    plan: { ...plan, created_at: new Date(plan.created_at), updated_at: new Date(plan.updated_at) },
+    cases: cases.map((c: any) => ({ ...c, created_at: new Date(c.created_at), updated_at: new Date(c.updated_at) }))
+  };
+};
+
+// ==============================================================================
+
 // Utilitário: registra ação no histórico do usuário (silencioso em caso de erro)
 export const logActivity = async (
   action: string,
@@ -75,7 +102,84 @@ const labelDEF = (row?: any) => `DEF-${String(row?.id || '').slice(0, 4)}`;
 const withUserScope = <Q>(query: any, userId?: string) => {
   if (SHARED_DATA) return query; // base compartilhada
   if (userId) return query.eq('user_id', userId);
-  return query;
+  return (query as any);
+};
+
+// =====================
+// Notifications (Cleanup and Creation)
+// =====================
+export const createNotification = async (payload: {
+  user_id: string;
+  title: string;
+  body?: string | null;
+  link?: string | null;
+}) => {
+  try {
+    // 1) Criar nova notificação
+    const { data, error } = await supabase
+      .from('notifications' as any)
+      .insert({
+        ...payload,
+        id: crypto.randomUUID(),
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // 2) Cleanup: Manter apenas as 50 notificações mais recentes do usuário
+    // (Lógica simples para evitar acúmulo desnecessário no banco - T07)
+    cleanupUserNotifications(payload.user_id).catch(() => {});
+
+    return data;
+  } catch (err) {
+    console.warn('[createNotification] falha ao criar notificação:', err);
+    return null;
+  }
+};
+
+const cleanupUserNotifications = async (userId: string) => {
+  try {
+    // Buscar IDs excedentes (notificações além das 50 mais recentes)
+    const { data: excessNotifs } = await supabase
+      .from('notifications' as any)
+      .select('id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .range(50, 100); // Pega do index 50 ao 100 (ajustável)
+
+    if (excessNotifs && excessNotifs.length > 0) {
+      const ids = excessNotifs.map((n: any) => n.id);
+      await supabase
+        .from('notifications' as any)
+        .delete()
+        .in('id', ids);
+    }
+
+    // Também limpar notificações lidas com mais de 7 dias
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    await supabase
+      .from('notifications' as any)
+      .delete()
+      .eq('user_id', userId)
+      .not('read_at', 'is', null)
+      .lt('read_at', sevenDaysAgo.toISOString());
+      
+  } catch (err) {
+    console.warn('[cleanupUserNotifications] falha no cleanup:', err);
+  }
+};
+
+// =====================
+// Reports & Dashboard (Otimização T02)
+// =====================
+export const getDashboardStats = async (projectId?: string) => {
+  const path = `/reports/dashboard${projectId ? `?project_id=${projectId}` : ''}`;
+  const result = await (supabase as any).get(path);
+  const { error, ...data } = result;
+  return { data: error ? null : data, error };
 };
 
 // =====================
@@ -130,6 +234,26 @@ export const getActivityLogs = async (
     metadata: r.metadata ?? null,
     created_at: new Date(r.created_at)
   }));
+};
+
+export const notifyStakeholders = async (payload: {
+  stakeholderIds: string[];
+  title: string;
+  body: string;
+  link: string;
+}) => {
+  const { stakeholderIds, title, body, link } = payload;
+  if (!stakeholderIds || stakeholderIds.length === 0) return;
+
+  const uniqueIds = Array.from(new Set(stakeholderIds.filter(Boolean)));
+  await Promise.all(uniqueIds.map(uid => 
+    createNotification({
+      user_id: uid,
+      title,
+      body,
+      link
+    })
+  ));
 };
 
 // Auto-exclusão de logs antigos
@@ -1046,6 +1170,20 @@ export const getCasesByRequirement = async (userId: string, requirementId: strin
     updated_at: new Date(testCase.updated_at)
   }));
 };
+
+export const getRequirementCaseLinksByRequirements = async (userId: string, requirementIds: string[]): Promise<{ requirement_id: string, case_id: string }[]> => {
+  if (!requirementIds.length) return [];
+  const { data, error } = await withUserScope(
+    supabase.from('requirements_cases').select('requirement_id, case_id'),
+    userId
+  ).in('requirement_id', requirementIds);
+  if (error) {
+    console.error('Erro ao buscar vínculos em lote:', error);
+    throw error;
+  }
+  return data || [];
+};
+
 
 // Criar vínculo entre requisito e caso de teste
 export const linkCaseToRequirement = async (userId: string, requirementId: string, caseId: string): Promise<void> => {

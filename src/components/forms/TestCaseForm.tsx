@@ -6,13 +6,16 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/hooks/useAuth';
 import { useProject } from '@/contexts/ProjectContext';
-import { createTestCase, getTestPlansByProject, updateTestCase, getRequirementsByProject, linkCaseToRequirement, createRequirement } from '@/services/supabaseService';
+import { createTestCase, getTestPlansByProject, updateTestCase, getRequirementsByProject, linkCaseToRequirement, createRequirement, notifyStakeholders } from '@/services/supabaseService';
 import { toast } from '@/components/ui/use-toast';
 import { TestCase, TestPlan, TestStep, Requirement } from '@/types';
 import { ChevronDown, ChevronUp, GripVertical, Plus, Trash2 } from 'lucide-react';
 import SearchableCombobox from '@/components/SearchableCombobox';
 import { ProjectSelectField } from '@/components/forms/ProjectSelectField';
 import { StandardButton } from '@/components/StandardButton';
+import { useProjectUsers } from '@/hooks/useProjectUsers';
+import { UserMultiSelectField } from '@/components/forms/UserMultiSelectField';
+import { supabase } from '@/integrations/supabase/client';
 
 interface TestCaseFormProps {
   onSuccess?: (testCase: TestCase) => void;
@@ -41,8 +44,11 @@ export const TestCaseForm = ({ onSuccess, onCancel, planId, initialData }: TestC
     priority: 'medium' as const,
     type: 'functional' as const,
     plan_id: planId || '',
-    branches: ''
+    branches: '',
+    assigned_to: '',
+    interested_users: [] as string[]
   });
+  const { users, labelFor } = useProjectUsers();
   const [steps, setSteps] = useState<TestStep[]>([
     { id: '1', action: '', expected_result: '', order: 1 }
   ]);
@@ -69,7 +75,9 @@ export const TestCaseForm = ({ onSuccess, onCancel, planId, initialData }: TestC
         priority: (initialData.priority as any) || 'medium',
         type: (initialData.type as any) || 'functional',
         plan_id: initialData.plan_id || planId || '',
-        branches: (initialData as any).branches || ''
+        branches: (initialData as any).branches || '',
+        assigned_to: (initialData as any).assigned_to || '',
+        interested_users: (initialData as any).interested_users || []
       });
       setSteps(
         (Array.isArray(initialData.steps) && initialData.steps.length > 0)
@@ -193,17 +201,37 @@ export const TestCaseForm = ({ onSuccess, onCancel, planId, initialData }: TestC
       // Normalize empty UUIDs to null to avoid Postgres uuid parse errors
       const cleanPlanId = formData.plan_id && formData.plan_id.trim() !== '' ? formData.plan_id : null;
 
-      const payload = {
+      const payload: any = {
         ...formData,
         plan_id: cleanPlanId,
         steps: steps.filter(step => step.action.trim() !== ''),
-        user_id: user.id,
         generated_by_ai: initialData?.generated_by_ai ?? false,
-      } as any;
+      };
+
+      // Só define user_id na criação para preservar o autor original na edição
+      if (!initialData) {
+        payload.user_id = user.id;
+      }
 
       const testCase = initialData
         ? await updateTestCase(initialData.id, payload)
         : await createTestCase(payload);
+
+      // Notificar interessados e responsável
+      const stakeholders = [...(formData.interested_users || [])];
+      if (formData.assigned_to && formData.assigned_to !== 'none') {
+        stakeholders.push(formData.assigned_to);
+      }
+
+      if (stakeholders.length > 0) {
+        const reporterName = (user as any)?.user_metadata?.full_name || (user as any)?.email || 'Alguém';
+        await notifyStakeholders({
+          stakeholderIds: stakeholders,
+          title: initialData ? 'Caso de teste atualizado - você é interessado' : 'Novo caso de teste - você é interessado',
+          body: `${reporterName} ${initialData ? 'atualizou' : 'criou'} um caso de teste: "${testCase.title}".`,
+          link: `/cases?id=${testCase.id}`,
+        });
+      }
 
       // Requisito: criar novo OU vincular existente
       if (!initialData) {
@@ -249,7 +277,7 @@ export const TestCaseForm = ({ onSuccess, onCancel, planId, initialData }: TestC
     onCancel?.();
   };
 
-  const handleChange = (field: string, value: string) => {
+  const handleChange = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -291,31 +319,46 @@ export const TestCaseForm = ({ onSuccess, onCancel, planId, initialData }: TestC
       )}
 
       {/* Título + Plano */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="tc-title" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Título *</Label>
+      <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+        <div className="sm:col-span-8 space-y-1.5">
+          <Label htmlFor="tc-title" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Título do Caso *</Label>
           <Input
             id="tc-title"
             value={formData.title}
             onChange={(e) => handleChange('title', e.target.value)}
-            placeholder="Título do caso de teste"
+            placeholder="Ex: Validar login com credenciais válidas"
             required
-            className="h-9 bg-muted/30 border-border/60 focus:border-brand/50 focus:ring-0"
+            className="h-10 bg-muted/20 border-border/40 focus:border-brand/50 focus:ring-0 transition-all"
           />
         </div>
-        {!planId && (
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Plano de Teste *</Label>
-            <SearchableCombobox
-              items={plans.map((p) => ({ value: p.id, label: p.title }))}
-              value={formData.plan_id}
-              onChange={(value) => handleChange('plan_id', value)}
-              placeholder="Selecione um plano"
-              disabled={!selectedProjectId}
-            />
-          </div>
-        )}
+        <div className="sm:col-span-4 space-y-1.5">
+          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Responsável</Label>
+          <Select value={formData.assigned_to} onValueChange={(value) => handleChange('assigned_to', value)}>
+            <SelectTrigger className="h-10 bg-muted/20 border-border/40 focus:ring-0">
+              <SelectValue placeholder="Selecione um responsável" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Nenhum</SelectItem>
+              {users.map(u => (
+                <SelectItem key={u.id} value={u.id}>{labelFor(u)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
+
+      {!planId && (
+        <div className="space-y-1.5">
+          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Vincular ao Plano de Teste *</Label>
+          <SearchableCombobox
+            items={plans.map((p) => ({ value: p.id, label: p.title }))}
+            value={formData.plan_id}
+            onChange={(value) => handleChange('plan_id', value)}
+            placeholder="Pesquisar planos..."
+            disabled={!selectedProjectId}
+          />
+        </div>
+      )}
 
       {/* Prioridade + Tipo */}
       <div className="grid grid-cols-2 gap-4">
@@ -473,6 +516,14 @@ export const TestCaseForm = ({ onSuccess, onCancel, planId, initialData }: TestC
                 <Plus className="h-3.5 w-3.5" /> Adicionar passo
               </button>
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Equipe Interessada (Notificações)</Label>
+            <UserMultiSelectField 
+              selectedIds={formData.interested_users}
+              onChange={(ids) => handleChange('interested_users', ids)}
+            />
           </div>
 
           <div className="space-y-1.5">

@@ -5,7 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/hooks/useAuth';
-import { createTestPlan, updateTestPlan } from '@/services/supabaseService';
+import { createTestPlan, updateTestPlan, notifyStakeholders } from '@/services/supabaseService';
 import { toast } from '@/components/ui/use-toast';
 import { TestPlan } from '@/types';
 import { ProjectSelectField } from '@/components/forms/ProjectSelectField';
@@ -13,7 +13,9 @@ import { useProject } from '@/contexts/ProjectContext';
 import { StandardButton } from '@/components/StandardButton';
 import { useStatusOptions } from '@/hooks/useStatusOptions';
 import { StatusManagerModal } from '@/components/StatusManagerModal';
-import { ChevronDown, ChevronUp, Plus } from 'lucide-react';
+import { ChevronDown, ChevronUp, Plus, User as UserIcon } from 'lucide-react';
+import { useProjectUsers } from '@/hooks/useProjectUsers';
+import { UserMultiSelectField } from '@/components/forms/UserMultiSelectField';
 
 interface TestPlanFormProps {
   onSuccess?: (plan: TestPlan) => void;
@@ -38,8 +40,12 @@ export const TestPlanForm = ({ onSuccess, onCancel, initialData }: TestPlanFormP
     schedule: initialData?.schedule || '',
     risks: initialData?.risks || '',
     status: initialData?.status || 'draft',
-    project_id: initialData?.project_id || currentProject?.id || ''
+    project_id: initialData?.project_id || currentProject?.id || '',
+    assigned_to: (initialData as any)?.assigned_to || '',
+    interested_users: initialData?.interested_users || []
   });
+
+  const { users, labelFor } = useProjectUsers();
 
   const displayStatusOptions = useMemo(() => {
     if (!formData.status) return options;
@@ -97,6 +103,22 @@ export const TestPlanForm = ({ onSuccess, onCancel, initialData }: TestPlanFormP
         });
       }
 
+      // Notificar interessados e responsável
+      const stakeholders = [...(formData.interested_users || [])];
+      if (formData.assigned_to && formData.assigned_to !== 'none') {
+        stakeholders.push(formData.assigned_to);
+      }
+
+      if (stakeholders.length > 0 && plan) {
+        const reporterName = (user as any)?.user_metadata?.full_name || (user as any)?.email || 'Alguém';
+        await notifyStakeholders({
+          stakeholderIds: stakeholders,
+          title: initialData ? 'Plano de teste atualizado - você é interessado' : 'Novo plano de teste - você é interessado',
+          body: `${reporterName} ${initialData ? 'atualizou' : 'criou'} um plano de teste: "${plan.title}".`,
+          link: `/plans?id=${plan.id}`,
+        });
+      }
+
       onSuccess?.(plan);
       try { localStorage.removeItem(storageKey); } catch (e) { /* noop */ }
     } catch (error) {
@@ -111,7 +133,7 @@ export const TestPlanForm = ({ onSuccess, onCancel, initialData }: TestPlanFormP
     }
   };
 
-  const handleChange = (field: string, value: string) => {
+  const handleChange = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -119,25 +141,39 @@ export const TestPlanForm = ({ onSuccess, onCancel, initialData }: TestPlanFormP
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      {/* Linha 1: Título + Projeto */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="title" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Título *</Label>
+      {/* Linha 1: Título + Projeto + Responsável */}
+      <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+        <div className="sm:col-span-6 space-y-1.5">
+          <Label htmlFor="title" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Título do Plano *</Label>
           <Input
             id="title"
             value={formData.title}
             onChange={(e) => handleChange('title', e.target.value)}
             placeholder="Nome do plano de teste"
             required
-            className="h-9 bg-muted/30 border-border/60 focus:border-brand/50 focus:ring-0"
+            className="h-10 bg-muted/20 border-border/40 focus:border-brand/50 focus:ring-0"
           />
         </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Projeto</Label>
+        <div className="sm:col-span-3 space-y-1.5">
+          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Projeto</Label>
           <ProjectSelectField
             value={formData.project_id}
             onValueChange={value => handleChange('project_id', value)}
           />
+        </div>
+        <div className="sm:col-span-3 space-y-1.5">
+          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Responsável</Label>
+          <Select value={formData.assigned_to} onValueChange={(value) => handleChange('assigned_to', value)}>
+            <SelectTrigger className="h-10 bg-muted/20 border-border/40 focus:ring-0">
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Nenhum</SelectItem>
+              {users.map(u => (
+                <SelectItem key={u.id} value={u.id}>{labelFor(u)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -225,6 +261,13 @@ export const TestPlanForm = ({ onSuccess, onCancel, initialData }: TestPlanFormP
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Riscos</Label>
               <Textarea value={formData.risks} onChange={(e) => handleChange('risks', e.target.value)} rows={2} className="bg-muted/30 border-border/60 focus:border-brand/50 focus:ring-0 resize-none" />
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Equipe Interessada (Notificações)</Label>
+            <UserMultiSelectField 
+              selectedIds={formData.interested_users}
+              onChange={(ids) => handleChange('interested_users', ids)}
+            />
           </div>
         </div>
       )}

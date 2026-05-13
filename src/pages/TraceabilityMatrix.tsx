@@ -9,6 +9,7 @@ import {
   getTestCases,
   getTestCasesByProject,
   getCasesByRequirement,
+  getRequirementCaseLinksByRequirements,
   linkRequirementToCase,
   unlinkRequirementFromCase,
   getDefects,
@@ -119,18 +120,17 @@ export const TraceabilityMatrix = ({ embedded = false, preferredViewMode, onPref
       setRequirements(reqs);
       setAllCases(cases);
 
-      // Carrega vínculos por requisito em paralelo
-      const results = await Promise.all(
-        reqs.map(r =>
-          getCasesByRequirement(user!.id, r.id).then(rCases => ({
-            reqId: r.id,
-            caseIds: rCases.map(c => c.id)
-          }))
-        )
-      );
+      // Carrega vínculos por requisito agregados de uma só vez (Otimização N+1)
+      const reqIds = reqs.map(r => r.id);
+      const links = await getRequirementCaseLinksByRequirements(user!.id, reqIds);
       const map: Record<string, string[]> = {};
-      for (const res of results) {
-        map[res.reqId] = res.caseIds;
+      for (const req of reqs) map[req.id] = [];
+      for (const link of links) {
+        if (map[link.requirement_id]) {
+          map[link.requirement_id].push(link.case_id);
+        } else {
+          map[link.requirement_id] = [link.case_id];
+        }
       }
       setLinkedByReq(map);
 

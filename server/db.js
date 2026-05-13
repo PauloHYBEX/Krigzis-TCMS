@@ -1,4 +1,4 @@
-﻿import Database from 'better-sqlite3';
+import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
@@ -36,11 +36,10 @@ export function query(sql, params = []) {
   const safe = coerceParams(Array.isArray(params) ? params : []);
   try {
     if (isRead || hasReturning) {
-      // better-sqlite3 aceita array diretamente quando passado como único argumento
-      const rows = safe.length === 0 ? stmt.all() : stmt.all(safe);
+      const rows = safe.length === 0 ? stmt.all() : stmt.all(...safe);
       return { rows, rowCount: rows.length };
     }
-    const result = safe.length === 0 ? stmt.run() : stmt.run(safe);
+    const result = safe.length === 0 ? stmt.run() : stmt.run(...safe);
     return { rows: [], rowCount: result.changes };
   } catch (err) {
     console.error('[db] query error\nSQL:', converted, '\nparams:', safe, '\nerr:', err.message);
@@ -59,3 +58,8 @@ export const pool = {
   connect: () => getClient(),
   end: () => { try { db.close(); } catch {} },
 };
+
+// Transação nativa do better-sqlite3
+export function transaction(fn) {
+  return db.transaction(fn);
+}

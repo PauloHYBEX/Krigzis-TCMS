@@ -5,6 +5,7 @@ import {
   ClipboardList,
   FlaskConical,
   Play,
+  Repeat,
   Kanban,
   Bot,
   TrendingUp,
@@ -26,6 +27,7 @@ const navigation = [
   { name: 'Planos de Teste', href: '/plans',        icon: ClipboardList,   color: 'text-purple-400', requiredPermission: 'can_manage_plans' },
   { name: 'Casos de Teste',  href: '/cases',        icon: FlaskConical,    color: 'text-teal-400',   requiredPermission: 'can_manage_cases' },
   { name: 'Execuções',       href: '/executions',   icon: Play,            color: 'text-green-400',  requiredPermission: 'can_manage_executions' },
+  { name: 'Ciclos',          href: '/runs',         icon: Repeat,          color: 'text-amber-400',  requiredPermission: 'can_manage_executions' },
   { name: 'Gestão',          href: '/management',   icon: Kanban,          color: 'text-orange-400', requiredPermission: null },
   { name: 'Relatórios',      href: '/reports',      icon: TrendingUp,      color: 'text-pink-400',   requiredPermission: 'can_view_reports' },
 ];

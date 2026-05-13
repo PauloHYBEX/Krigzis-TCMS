@@ -20,6 +20,7 @@ export const ExecutionStatusEnum = z.enum(['passed', 'failed', 'blocked', 'not_t
 export const DefectStatusEnum = z.enum(['open', 'in_analysis', 'fixed', 'validated', 'closed']);
 export const DefectSeverityEnum = PriorityEnum;
 export const RequirementStatusEnum = z.enum(['open', 'in_progress', 'approved', 'deprecated']);
+export const TestRunStatusEnum = z.enum(['planned', 'in_progress', 'completed', 'aborted']);
 
 // ─── TestPlan ──────────────────────────────────────────────────────────────
 export const TestPlanInputSchema = z.object({
@@ -89,12 +90,26 @@ export type DefectInput = z.infer<typeof DefectInputSchema>;
 
 // ─── Requirement ───────────────────────────────────────────────────────────
 export const RequirementInputSchema = z.object({
+  project_id: uuid,
   title: nonEmpty('Titulo', 200),
   description: optStr(),
   priority: PriorityEnum,
   status: RequirementStatusEnum,
 });
 export type RequirementInput = z.infer<typeof RequirementInputSchema>;
+
+// ─── TestRun (Ciclo de Execução) ───────────────────────────────────────────
+export const TestRunInputSchema = z.object({
+  project_id: uuid,
+  title: nonEmpty('Titulo', 200),
+  description: optStr(),
+  status: TestRunStatusEnum,
+  plan_id: uuidOrNull.optional(),
+  assigned_to: uuidOrNull.optional(),
+  starts_at: z.string().optional().nullable(),
+  ends_at: z.string().optional().nullable(),
+});
+export type TestRunInput = z.infer<typeof TestRunInputSchema>;
 
 // ─── Transicoes de estado (state machine) ──────────────────────────────────
 // Define quais transicoes de status sao permitidas para cada entidade.
@@ -115,6 +130,13 @@ const REQUIREMENT_TRANSITIONS: Record<string, string[]> = {
   deprecated: ['open'],
 };
 
+const RUN_TRANSITIONS: Record<string, string[]> = {
+  planned: ['in_progress', 'aborted'],
+  in_progress: ['completed', 'aborted', 'planned'],
+  completed: ['in_progress'],
+  aborted: ['planned'],
+};
+
 export function canTransitionDefect(from: string, to: string): boolean {
   if (from === to) return true;
   return (DEFECT_TRANSITIONS[from] || []).includes(to);
@@ -123,6 +145,11 @@ export function canTransitionDefect(from: string, to: string): boolean {
 export function canTransitionRequirement(from: string, to: string): boolean {
   if (from === to) return true;
   return (REQUIREMENT_TRANSITIONS[from] || []).includes(to);
+}
+
+export function canTransitionRun(from: string, to: string): boolean {
+  if (from === to) return true;
+  return (RUN_TRANSITIONS[from] || []).includes(to);
 }
 
 // Helper generico para extrair primeiro erro de um ZodError em formato amigavel

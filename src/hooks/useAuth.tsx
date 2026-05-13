@@ -107,12 +107,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   };
 
-  const resetPassword = async (email: string) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-
-    return { error };
+  const resetPassword = async (_email: string) => {
+    return {
+      error: {
+        message:
+          'Recuperação de senha por e-mail não está disponível no modo local. Acesse /reset-password estando logado para alterar sua senha.',
+      },
+    };
   };
 
   const value = {

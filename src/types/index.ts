@@ -24,11 +24,13 @@ export interface TestPlan {
   branches?: string;
   // Número sequencial opcional para exibição amigável (preenchido via migração)
   sequence?: number;
+  interested_users?: string[];
 }
 
 export interface TestCase {
   id: string;
   plan_id: string;
+  project_id?: string;
   title: string;
   description: string;
   preconditions: string;
@@ -39,11 +41,11 @@ export interface TestCase {
   created_at: Date;
   updated_at: Date;
   user_id: string;
+  assigned_to?: string | null;
   generated_by_ai: boolean;
-  // Número sequencial opcional para exibição amigável (preenchido via migração)
   sequence?: number;
-  // Branch(es) de código-fonte ligada(s) a este caso (ex: "sprint_16_06_login")
   branches?: string;
+  interested_users?: string[];
 }
 
 export interface TestStep {
@@ -57,14 +59,43 @@ export interface TestExecution {
   id: string;
   case_id: string;
   plan_id: string;
+  run_id?: string | null;
   status: 'passed' | 'failed' | 'blocked' | 'not_tested';
   actual_result: string;
   notes: string;
   executed_at: Date;
   executed_by: string;
   user_id: string;
+  assigned_to?: string | null;
   // Número sequencial opcional para exibição amigável (preenchido via migração)
   sequence?: number;
+  interested_users?: string[];
+}
+
+// Test Run (Ciclo de Execução) — agrupa execuções por sprint/release/cycle
+export type TestRunStatus = 'planned' | 'in_progress' | 'completed' | 'aborted';
+
+export interface TestRun {
+  id: string;
+  title: string;
+  description: string;
+  status: TestRunStatus;
+  project_id: string;
+  plan_id?: string | null;
+  assigned_to?: string | null;
+  starts_at?: string | null;
+  ends_at?: string | null;
+  created_by?: string | null;
+  sequence?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TestRunProgress {
+  run: Pick<TestRun, 'id' | 'title' | 'status' | 'project_id' | 'plan_id'>;
+  totals: { passed: number; failed: number; blocked: number; not_tested: number; total: number };
+  completionRate: number;
+  passRate: number;
 }
 
 // =====================
@@ -81,6 +112,7 @@ export interface Requirement {
   created_at: Date;
   updated_at: Date;
   sequence?: number;
+  interested_users?: string[];
 }
 
 export interface Defect {
@@ -98,6 +130,7 @@ export interface Defect {
   created_at: Date;
   updated_at: Date;
   sequence?: number;
+  interested_users?: string[];
 }
 
 export interface Theme {

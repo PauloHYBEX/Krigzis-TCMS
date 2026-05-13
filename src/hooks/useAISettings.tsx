@@ -6,12 +6,14 @@ interface AISettings {
   batchCaseGenerationEnabled: boolean;
   // Modelo preferido para os modais de geração por IA. "default" usa o modelo base do painel.
   preferredModel?: string; // id do modelo ou "default"
+  hideInactiveModels?: boolean;
 }
 
 const DEFAULT_SETTINGS: AISettings = {
   batchGenerationEnabled: false,
   batchCaseGenerationEnabled: false,
   preferredModel: 'default',
+  hideInactiveModels: false,
 };
 
 export const useAISettings = () => {

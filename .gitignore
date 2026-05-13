@@ -76,3 +76,6 @@ data/
 
 # Ignora arquivo privado
 /anteriormente havia me passado um descritivo com....docx
+
+# Pasta de configuração de agentes AI (uso exclusivo da IDE/local)
+.agent/

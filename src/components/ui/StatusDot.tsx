@@ -24,6 +24,11 @@ const DOT_CLASS: Record<string, string> = {
   fixed:        'bg-blue-500',
   validated:    'bg-emerald-500',
   closed:       'bg-slate-500',
+  // TestRun status
+  planned:      'bg-blue-500',
+  aborted:      'bg-red-500',
+  // 'in_progress' já mapeado acima
+  // 'completed' já mapeado acima
 };
 
 interface StatusDotProps {

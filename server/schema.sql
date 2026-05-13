@@ -86,9 +86,26 @@ CREATE TABLE IF NOT EXISTS test_cases (
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
   created_by TEXT REFERENCES profiles(id),
   user_id TEXT REFERENCES profiles(id),
+  assigned_to TEXT REFERENCES profiles(id),
   generated_by_ai INTEGER DEFAULT 0,
   sequence INTEGER,
   steps TEXT DEFAULT '[]',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS test_runs (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  status TEXT DEFAULT 'planned' CHECK(status IN ('planned','in_progress','completed','aborted')),
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  plan_id TEXT REFERENCES test_plans(id) ON DELETE SET NULL,
+  assigned_to TEXT REFERENCES profiles(id),
+  starts_at TEXT,
+  ends_at TEXT,
+  created_by TEXT REFERENCES profiles(id),
+  sequence INTEGER,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -97,6 +114,7 @@ CREATE TABLE IF NOT EXISTS test_executions (
   id TEXT PRIMARY KEY,
   case_id TEXT REFERENCES test_cases(id) ON DELETE CASCADE,
   plan_id TEXT REFERENCES test_plans(id) ON DELETE SET NULL,
+  run_id TEXT REFERENCES test_runs(id) ON DELETE SET NULL,
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
   status TEXT DEFAULT 'not_tested',
   actual_result TEXT DEFAULT '',
@@ -105,6 +123,7 @@ CREATE TABLE IF NOT EXISTS test_executions (
   executed_at TEXT,
   created_by TEXT REFERENCES profiles(id),
   user_id TEXT REFERENCES profiles(id),
+  assigned_to TEXT REFERENCES profiles(id),
   generated_by_ai INTEGER DEFAULT 0,
   sequence INTEGER,
   created_at TEXT DEFAULT (datetime('now')),
@@ -117,7 +136,7 @@ CREATE TABLE IF NOT EXISTS requirements (
   description TEXT DEFAULT '',
   type TEXT DEFAULT 'functional',
   priority TEXT DEFAULT 'medium',
-  status TEXT DEFAULT 'draft',
+  status TEXT DEFAULT 'open',
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
   created_by TEXT REFERENCES profiles(id),
   created_at TEXT DEFAULT (datetime('now')),
@@ -234,6 +253,10 @@ CREATE INDEX IF NOT EXISTS idx_defects_plan ON defects(plan_id);
 CREATE INDEX IF NOT EXISTS idx_requirements_cases_req ON requirements_cases(requirement_id);
 CREATE INDEX IF NOT EXISTS idx_requirements_cases_case ON requirements_cases(case_id);
 CREATE INDEX IF NOT EXISTS idx_test_cases_project_status ON test_cases(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_test_runs_project ON test_runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_test_runs_plan ON test_runs(plan_id);
+CREATE INDEX IF NOT EXISTS idx_test_runs_status ON test_runs(status);
+CREATE INDEX IF NOT EXISTS idx_executions_run ON test_executions(run_id);
 
 -- Configurar realtime para notificacoes (Supabase realtime)
 -- Nota: Em SQLite local, o realtime eh simulado via polling no cliente

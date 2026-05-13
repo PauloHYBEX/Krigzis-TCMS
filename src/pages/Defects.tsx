@@ -15,6 +15,7 @@ import {
   getTestExecutionsByProject,
   getTestCasesByProject,
   getTestExecutions,
+  notifyStakeholders,
 } from '@/services/supabaseService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -33,6 +34,7 @@ import { ViewModeToggle } from '@/components/ViewModeToggle';
 import { DetailModal } from '@/components/DetailModal';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useProject } from '@/contexts/ProjectContext';
+import { UserMultiSelectField } from '@/components/forms/UserMultiSelectField';
 
 export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewModeChange }: { embedded?: boolean; preferredViewMode?: 'cards'|'list'; onPreferredViewModeChange?: (m: 'cards'|'list') => void; }) => {
   const { user } = useAuth();
@@ -71,6 +73,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
   const [stakeholder, setStakeholder] = useState<string>('');
   const [projectUsers, setProjectUsers] = useState<Array<{ id: string; display_name: string | null; email: string }>>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [interestedUsers, setInterestedUsers] = useState<string[]>([]);
   const BASE_PATH = '/defects';
   
   // Constrói um conjunto seguro de query params permitido pela tela
@@ -168,7 +171,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
   const closeForm = () => {
     setShowForm(false);
     setEditing(null);
-    setStakeholder('');
+    setInterestedUsers([]);
     clearIdParam();
   };
 
@@ -231,7 +234,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
     setStatus('open');
     setCaseId('');
     setExecutionId('');
-    setStakeholder('');
+    setInterestedUsers([]);
     setCaseExecutions([]);
     loadUsers();
     setShowForm(true);
@@ -247,6 +250,7 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
     setCaseId(d.case_id || '');
     setExecutionId(d.execution_id || '');
     setStakeholder(d.assigned_to || '');
+    setInterestedUsers((d as any).interested_users || []);
     loadUsers();
     setShowForm(true);
     const params = buildSafeSearchParams(location.search);
@@ -283,43 +287,60 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
           return;
         }
       }
-      const sendNotification = async (targetUserId: string, defectId: string, isUpdate = false) => {
-        const reporterName = (user as any).user_metadata?.full_name || (user as any).email || 'Alguém';
-        const sevLabel = severity === 'critical' ? 'Crítica' : severity === 'high' ? 'Alta' : severity === 'medium' ? 'Média' : 'Baixa';
-        await supabase.from('notifications' as any).insert({
-          id: crypto.randomUUID(),
-          user_id: targetUserId,
-          title: isUpdate ? 'Defeito atualizado - você é interessado' : 'Novo defeito reportado',
-          body: isUpdate
-            ? `${reporterName} atualizou um defeito onde você é interessado: "${title.trim()}" (${sevLabel}).`
-            : `${reporterName} reportou um defeito: "${title.trim()}" (${sevLabel}).`,
-          link: `/defects?id=${defectId}&modal=defect:view`,
-        });
+      const handleNotifications = async (defectId: string, isUpdate = false) => {
+        const stakeholders = [...(interestedUsers || [])];
+        if (stakeholder && stakeholder !== 'none') {
+          stakeholders.push(stakeholder);
+        }
+
+        if (stakeholders.length > 0) {
+          const reporterName = (user as any).user_metadata?.full_name || (user as any).email || 'Alguém';
+          const sevLabel = severity === 'critical' ? 'Crítica' : severity === 'high' ? 'Alta' : severity === 'medium' ? 'Média' : 'Baixa';
+          await notifyStakeholders({
+            stakeholderIds: stakeholders,
+            title: isUpdate ? 'Defeito atualizado - você é interessado' : 'Novo defeito reportado',
+            body: isUpdate
+              ? `${reporterName} atualizou um defeito onde você é interessado: "${title.trim()}" (${sevLabel}).`
+              : `${reporterName} reportou um defeito: "${title.trim()}" (${sevLabel}).`,
+            link: `/defects?id=${defectId}&modal=defect:view`,
+          });
+        }
       };
 
       if (editing) {
-        const updated = await updateDefect(editing.id, { title, description, severity, status, case_id: caseId || null, execution_id: executionId || null, assigned_to: stakeholder || null });
+        const updated = await updateDefect(editing.id, { 
+          title, 
+          description, 
+          severity, 
+          status, 
+          case_id: caseId || null, 
+          execution_id: executionId || null, 
+          assigned_to: stakeholder || null,
+          interested_users: interestedUsers
+        } as any);
         setDefects(prev => prev.map(r => r.id === updated.id ? updated : r));
-        // Notificar ao salvar em modo edicao se stakeholder foi informado
-        if (stakeholder) {
-          await sendNotification(stakeholder, updated.id, true);
-          toast({ title: 'Atualizado', description: 'Defeito atualizado e notificação enviada ao interessado.' });
-        } else {
-          toast({ title: 'Atualizado', description: 'Defeito atualizado com sucesso.' });
-        }
+        await handleNotifications(updated.id, true);
+        toast({ title: 'Atualizado', description: 'Defeito atualizado com sucesso.' });
       } else {
         if (!currentProject?.id) {
           toast({ title: 'Selecione um projeto', description: 'É necessário selecionar um projeto para criar defeitos.', variant: 'destructive' });
           return;
         }
-        const created = await createDefect({ user_id: user.id, project_id: currentProject.id, title, description, severity, status, case_id: caseId || null, execution_id: executionId || null, assigned_to: stakeholder || null });
+        const created = await createDefect({ 
+          user_id: user.id, 
+          project_id: currentProject.id, 
+          title, 
+          description, 
+          severity, 
+          status, 
+          case_id: caseId || null, 
+          execution_id: executionId || null, 
+          assigned_to: stakeholder || null,
+          interested_users: interestedUsers
+        } as any);
         setDefects(prev => [created, ...prev]);
-        if (stakeholder) {
-          await sendNotification(stakeholder, created.id, false);
-          toast({ title: 'Criado', description: stakeholder === user.id ? 'Defeito criado e você foi notificado como interessado.' : 'Defeito criado e notificação enviada ao interessado.' });
-        } else {
-          toast({ title: 'Criado', description: 'Defeito criado com sucesso.' });
-        }
+        await handleNotifications(created.id, false);
+        toast({ title: 'Criado', description: 'Defeito criado com sucesso.' });
       }
       closeForm();
     } catch (e: any) {
@@ -490,20 +511,11 @@ export const Defects = ({ embedded = false, preferredViewMode, onPreferredViewMo
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Interessado <span className="normal-case font-normal">(opcional)</span></label>
-              <select
-                value={stakeholder}
-                onChange={(e) => setStakeholder(e.target.value)}
-                disabled={loadingUsers}
-                className="w-full rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm text-foreground focus:outline-none focus:border-brand/50"
-              >
-                <option value="">Selecionar interessado (opcional)</option>
-                {projectUsers.map(u => (
-                  <option key={u.id} value={u.id}>
-                    {u.id === user?.id ? '(Eu) ' : ''}{u.display_name || u.email}
-                  </option>
-                ))}
-              </select>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Equipe Interessada (Notificações)</label>
+              <UserMultiSelectField 
+                selectedIds={interestedUsers}
+                onChange={setInterestedUsers}
+              />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
